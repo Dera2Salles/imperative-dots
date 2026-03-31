@@ -1,0 +1,10 @@
+{
+  "generate_conf": {
+    "input_dir": "/etc/nixos/config/sessions/hyprland/",
+    "output_dir": "~/Projects/hyprland-dots/.config/hypr/"
+  },
+  "matugen_conf": {
+    "input_dir": "/etc/nixos/config/programs/matugen/",
+    "output_dir": "~/Projects/hyprland-dots/.config/matugen/"
+  }
+}
