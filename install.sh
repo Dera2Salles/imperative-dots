@@ -34,6 +34,8 @@ KB_SHORTCUT_DISPLAY="Not Set"
 KB_HYPR_CONF=""
 WALLPAPER_DIR="$HOME/Images/Wallpapers"
 WEATHER_API_KEY=""
+WEATHER_CITY_ID=""
+WEATHER_UNIT=""
 FAILED_PKGS=()
 
 INSTALL_SWAYOSD=false
@@ -45,7 +47,7 @@ INSTALL_ZSH=false
 # ==============================================================================
 ARCH_PKGS=(
     "hyprland" "kitty" "cava" "rofi-wayland" "swaync" 
-    "pavucontrol" "alsa-utils" "swww" "networkmanager-dmenu-git"
+    "pavucontrol" "alsa-utils" "awww" "networkmanager-dmenu-git"
     "wl-clipboard" "fd" "qt6-multimedia" "qt6-5compat" "ripgrep"
     "cliphist" "jq" "socat" "pamixer" "brightnessctl" "acpi" "iw"
     "bluez" "bluez-utils" "libnotify" "networkmanager" "lm_sensors" "bc" 
@@ -57,7 +59,7 @@ ARCH_PKGS=(
 
 FEDORA_PKGS=(
     "hyprland" "kitty" "cava" "rofi-wayland" "swaync" 
-    "pavucontrol" "alsa-utils" "swww" "networkmanager-dmenu"
+    "pavucontrol" "alsa-utils" "awww" "networkmanager-dmenu"
     "wl-clipboard" "fd-find" "qt6-qtmultimedia" "qt6-qt5compat" "ripgrep"
     "cliphist" "jq" "socat" "pamixer" "brightnessctl" "acpi" "iw"
     "bluez" "bluez-tools" "libnotify" "NetworkManager" "lm_sensors" "bc" 
@@ -82,10 +84,10 @@ case $OS in
     arch|endeavouros|manjaro|cachyos)
         PKGS=("${ARCH_PKGS[@]}")
         
-        # 1. Ensure basic pacman tools are present
-        if ! command -v fzf &> /dev/null || ! command -v lspci &> /dev/null; then
-            echo -e "${C_CYAN}Bootstrapping TUI dependencies (fzf, pciutils)...${RESET}"
-            sudo pacman -Sy --noconfirm --needed fzf pciutils > /dev/null 2>&1
+        # 1. Ensure basic pacman tools are present (added jq and curl for Weather API)
+        if ! command -v fzf &> /dev/null || ! command -v lspci &> /dev/null || ! command -v jq &> /dev/null || ! command -v curl &> /dev/null; then
+            echo -e "${C_CYAN}Bootstrapping TUI dependencies (fzf, pciutils, jq, curl)...${RESET}"
+            sudo pacman -Sy --noconfirm --needed fzf pciutils jq curl > /dev/null 2>&1
         fi
         
         # 2. Automatically install 'yay' if no AUR helper is found on a clean system
@@ -103,16 +105,15 @@ case $OS in
         elif command -v paru &> /dev/null; then
             PKG_MANAGER="paru -S --noconfirm --needed"
         else
-            # Fallback if AUR compilation failed for some reason
             PKG_MANAGER="sudo pacman -S --noconfirm --needed"
         fi
         ;;
     fedora)
         PKG_MANAGER="sudo dnf install -y"
         PKGS=("${FEDORA_PKGS[@]}")
-        if ! command -v fzf &> /dev/null || ! command -v lspci &> /dev/null; then
-            echo -e "${C_CYAN}Bootstrapping TUI dependencies (fzf, pciutils)...${RESET}"
-            sudo dnf install -y fzf pciutils > /dev/null 2>&1
+        if ! command -v fzf &> /dev/null || ! command -v lspci &> /dev/null || ! command -v jq &> /dev/null || ! command -v curl &> /dev/null; then
+            echo -e "${C_CYAN}Bootstrapping TUI dependencies (fzf, pciutils, jq, curl)...${RESET}"
+            sudo dnf install -y fzf pciutils jq curl > /dev/null 2>&1
         fi
         ;;
     *)
@@ -147,12 +148,11 @@ draw_header() {
  ╚═╝╚══════╝╚═╝   ╚═╝  ╚═╝╚═╝    ╚═╝╚═╝╚═╝  ╚═╝ ╚═════╝ 
 EOF
     printf "${RESET}\n"
-    # \033[K clears the rest of the line to prevent ghost text from previous frames
     printf "\033[K${C_MAGENTA}=================================================================${RESET}\n"
-    printf "\033[K${BOLD} User:${RESET}            %s\n" "$USER_NAME"
-    printf "\033[K${BOLD} OS:  ${RESET}            %s\n" "$OS_NAME"
-    printf "\033[K${BOLD} CPU: ${RESET}            %s\n" "$CPU_INFO"
-    printf "\033[K${BOLD} GPU: ${RESET}            %s\n" "$GPU_INFO"
+    printf "\033[K${BOLD} User:${RESET}             %s\n" "$USER_NAME"
+    printf "\033[K${BOLD} OS:  ${RESET}             %s\n" "$OS_NAME"
+    printf "\033[K${BOLD} CPU: ${RESET}             %s\n" "$CPU_INFO"
+    printf "\033[K${BOLD} GPU: ${RESET}             %s\n" "$GPU_INFO"
     printf "\033[K${C_MAGENTA}-----------------------------------------------------------------${RESET}\n"
     printf "\033[K${BOLD} Server Version:${RESET}  %s\n" "$DOTS_VERSION"
     printf "\033[K${BOLD} Local Version: ${RESET}  %s\n" "$LOCAL_VERSION"
@@ -217,12 +217,8 @@ set_keyboard_shortcut() {
 set_weather_api() {
     while true; do
         draw_header
-        echo -e "${BOLD}${C_CYAN}=== OpenWeatherMap API Key Setup ===${RESET}"
-        echo -e "${BOLD}${C_YELLOW}WARNING: Without this key, the weather widgets in your Quickshell setup WILL NOT WORK.${RESET}\n"
-        echo -e "To get your free API key, follow these steps:"
-        echo -e "  1. Go to ${BOLD}https://openweathermap.org/${RESET}"
-        echo -e "  2. Create a free account."
-        echo -e "  3. Generate a new key from 'My API Keys', copy it, and paste it here.\n"
+        echo -e "${BOLD}${C_CYAN}=== OpenWeatherMap Interactive Setup ===${RESET}"
+        echo -e "${BOLD}${C_YELLOW}WARNING: Without this, weather widgets WILL NOT WORK.${RESET}\n"
         
         read -p "Enter your OpenWeather API Key (or press Enter to skip): " input_key
         
@@ -231,14 +227,74 @@ set_weather_api() {
             read -p "Are you absolutely sure you want to proceed without it? (y/n): " confirm
             if [[ "$confirm" =~ ^[Yy]$ ]]; then
                 WEATHER_API_KEY="Skipped"
+                WEATHER_CITY_ID=""
+                WEATHER_UNIT=""
                 break
             fi
-        else
-            WEATHER_API_KEY="$input_key"
-            echo -e "\n${C_GREEN}API Key Saved locally for installation!${RESET}"
-            sleep 1.5
-            break
+            continue
         fi
+        
+        WEATHER_API_KEY="$input_key"
+        
+        echo -e "\n${C_CYAN}Let's find your exact City ID.${RESET}"
+        read -p "Enter your city name (e.g., London, New York): " input_city
+        
+        if [[ -n "$input_city" ]]; then
+            echo -e "Searching for '${input_city}'..."
+            
+            # Safely encode the city string for URL usage
+            encoded_city=$(echo "$input_city" | jq -sRr @uri)
+            api_response=$(curl -s "http://api.openweathermap.org/data/2.5/find?q=${encoded_city}&appid=${WEATHER_API_KEY}")
+            
+            # Validate API Key & Response
+            status_code=$(echo "$api_response" | jq -r '.cod | tostring')
+            if [[ "$status_code" != "200" ]]; then
+                error_msg=$(echo "$api_response" | jq -r '.message')
+                echo -e "\n${C_RED}API Error: ${error_msg}${RESET}"
+                echo -e "Please check your API key and try again.\n"
+                read -p "Press Enter to retry..."
+                continue
+            fi
+            
+            # Check if any cities matched
+            count=$(echo "$api_response" | jq -r '.count')
+            if [[ "$count" == "0" ]]; then
+                echo -e "\n${C_RED}No cities found matching '${input_city}'.${RESET}"
+                read -p "Press Enter to retry..."
+                continue
+            fi
+            
+            # Create a selection menu of matched cities
+            selected_city=$(echo "$api_response" | jq -r '.list[] | "\(.id) | \(.name), \(.sys.country) (Lat: \(.coord.lat), Lon: \(.coord.lon))"' | fzf \
+                --layout=reverse --height=15 \
+                --prompt="Select your exact city > " \
+                --header="Use ARROWS to navigate. ENTER to confirm.")
+            
+            if [[ -n "$selected_city" ]]; then
+                WEATHER_CITY_ID=$(echo "$selected_city" | awk '{print $1}')
+                city_display=$(echo "$selected_city" | cut -d'|' -f2 | xargs)
+                echo -e "${C_GREEN}Selected: ${city_display} (ID: ${WEATHER_CITY_ID})${RESET}"
+            else
+                echo -e "${C_RED}City selection cancelled.${RESET}"
+                continue
+            fi
+        else
+            echo -e "${C_RED}City name cannot be empty.${RESET}"
+            continue
+        fi
+        
+        # Ask for standard units
+        unit_choice=$(echo -e "metric (Celsius)\nimperial (Fahrenheit)\nstandard (Kelvin)" | fzf \
+            --layout=reverse --height=10 \
+            --prompt="Select Temperature Unit > " \
+            --header="Choose your preferred unit format")
+        
+        WEATHER_UNIT=$(echo "$unit_choice" | awk '{print $1}')
+        [[ -z "$WEATHER_UNIT" ]] && WEATHER_UNIT="metric"
+        
+        echo -e "\n${C_GREEN}Weather configuration complete!${RESET}"
+        sleep 1.5
+        break
     done
 }
 
@@ -284,7 +340,7 @@ while true; do
     
     if [[ -z "$WEATHER_API_KEY" ]]; then API_DISPLAY="Not Set"
     elif [[ "$WEATHER_API_KEY" == "Skipped" ]]; then API_DISPLAY="Skipped"
-    else API_DISPLAY="Set (Hidden)"; fi
+    else API_DISPLAY="Set ($WEATHER_UNIT, ID: $WEATHER_CITY_ID)"; fi
 
     MENU_OPTION=$(echo -e "1. Manage Packages [${#PKGS[@]} queued]\n2. Set Keyboard Switcher [${KB_SHORTCUT_DISPLAY}]\n3. Set Weather API Key [${API_DISPLAY}]\n4. START INSTALLATION\n5. Exit" | fzf \
         --layout=reverse \
@@ -433,9 +489,17 @@ done
 if [[ -n "$WEATHER_API_KEY" && "$WEATHER_API_KEY" != "Skipped" ]]; then
     ENV_TARGET_DIR="$TARGET_CONFIG_DIR/hypr/scripts/quickshell/calendar"
     mkdir -p "$ENV_TARGET_DIR"
-    echo "OPENWEATHER_KEY=\"$WEATHER_API_KEY\"" > "$ENV_TARGET_DIR/.env"
+    
+    # Write the .env file with all gathered parameters
+    cat <<EOF > "$ENV_TARGET_DIR/.env"
+# OpenWeather API Configuration
+OPENWEATHER_KEY=${WEATHER_API_KEY}
+OPENWEATHER_CITY_ID=${WEATHER_CITY_ID}
+OPENWEATHER_UNIT=${WEATHER_UNIT}
+EOF
+    
     chmod 600 "$ENV_TARGET_DIR/.env"
-    printf "  -> Saved Weather API key to .env %-7s ${C_GREEN}[ OK ]${RESET}\n" ""
+    printf "  -> Saved Weather API config to .env %-7s ${C_GREEN}[ OK ]${RESET}\n" ""
 fi
 
 # Deploy Cava Wrapper
@@ -459,7 +523,9 @@ REPO_FONTS_DIR="$REPO_DIR/.local/share/fonts"
 mkdir -p "$TARGET_FONTS_DIR"
 
 if [ -d "$REPO_FONTS_DIR" ]; then
-    cp -r "$REPO_FONTS_DIR/"* "$TARGET_FONTS_DIR/" 2>/dev/null || true
+    # Using cp -a with /. ensures all files, folders, and hidden items are copied exactly
+    cp -a "$REPO_FONTS_DIR/." "$TARGET_FONTS_DIR/" 2>/dev/null || true
+    
     # Fix permissions so fontconfig can actually read them
     find "$TARGET_FONTS_DIR" -type f -exec chmod 644 {} \;
     find "$TARGET_FONTS_DIR" -type d -exec chmod 755 {} \;
@@ -492,6 +558,7 @@ HYPR_CONF="$TARGET_CONFIG_DIR/hypr/hyprland.conf"
 ZSH_RC="$HOME/.zshrc"
 WP_QML="$TARGET_CONFIG_DIR/hypr/scripts/quickshell/wallpaper/WallpaperPicker.qml"
 DIARY_MGR="$TARGET_CONFIG_DIR/hypr/scripts/quickshell/calendar/diary_manager.sh"
+WP_DIR="$TARGET_CONFIG_DIR/hypr/scripts/quickshell/wallpaper"
 
 if [ -f "$HYPR_CONF" ]; then
     # 1. Universal Monitor Setup
@@ -502,15 +569,18 @@ if [ -f "$HYPR_CONF" ]; then
     sed -i '/exec, Telegram/d' "$HYPR_CONF"
     sed -i '/exec, obsidian/d' "$HYPR_CONF"
 
-    # 3. Inject SwayOSD Autostart
+    # 3. Swap swww-daemon for awww daemon
+    sed -i 's/swww-daemon/awww-daemon/g' "$HYPR_CONF"
+
+    # 4. Inject SwayOSD Autostart (Looking for the new 'awww daemon' entry)
     if [ "$INSTALL_SWAYOSD" = true ]; then
-        sed -i '/^exec-once = swww-daemon/a exec-once = swayosd-server --top-margin 0.9 --style ~/.config/swayosd/style.css' "$HYPR_CONF"
+        sed -i '/^exec-once = awww daemon/a exec-once = swayosd-server --top-margin 0.9 --style ~/.config/swayosd/style.css' "$HYPR_CONF"
     fi
 
-    # 4. Inject Environment Variables for Quickshell
+    # 5. Inject Environment Variables for Quickshell
     sed -i "/^env = NIXOS_OZONE_WL,1/a env = WALLPAPER_DIR,$WALLPAPER_DIR\nenv = SCRIPT_DIR,$HOME/.config/hypr/scripts" "$HYPR_CONF"
 
-    # 5. Fix Bezier Curve and Keyboard Layout (Arch Fixes)
+    # 6. Fix Bezier Curve and Keyboard Layout (Arch Fixes)
     # Inject the missing 'myBezier' definition right after 'animations {'
     sed -i '/animations {/a \    bezier = myBezier, 0.05, 0.9, 0.1, 1.05' "$HYPR_CONF"
     # Remove the space in the keyboard layout string
@@ -519,17 +589,22 @@ else
     echo -e "${C_RED}Warning: hyprland.conf not found at $HYPR_CONF${RESET}"
 fi
 
-# 5. Patch WallpaperPicker.qml dynamically
+# 7. Patch WallpaperPicker.qml dynamically
 if [ -f "$WP_QML" ]; then
     sed -i 's|Quickshell.env("HOME") + "/Images/Wallpapers"|Quickshell.env("WALLPAPER_DIR")|g' "$WP_QML"
 fi
 
-# 6. Remove Personal Diary Manager
+# 8. Rename all instances of swww to awww in quickshell/wallpaper files
+if [ -d "$WP_DIR" ]; then
+    find "$WP_DIR" -type f -exec sed -i 's/swww/awww/g' {} +
+fi
+
+# 9. Remove Personal Diary Manager
 if [ -f "$DIARY_MGR" ]; then
     rm -f "$DIARY_MGR"
 fi
 
-# 7. Zsh Dynamism
+# 10. Zsh Dynamism
 if [ -f "$ZSH_RC" ]; then
     echo -e "\n# Dynamic System Paths" >> "$ZSH_RC"
     echo "export WALLPAPER_DIR=\"$WALLPAPER_DIR\"" >> "$ZSH_RC"
@@ -537,7 +612,7 @@ if [ -f "$ZSH_RC" ]; then
     sed -i "s/OS_LOGO_PLACEHOLDER/${OS}_small/g" "$ZSH_RC"
 fi
 
-# 8. Remove Schedule Directory
+# 11. Remove Schedule Directory
 SCHEDULE_DIR="$TARGET_CONFIG_DIR/hypr/scripts/quickshell/calendar/schedule"
 if [ -d "$SCHEDULE_DIR" ]; then
     rm -rf "$SCHEDULE_DIR"
