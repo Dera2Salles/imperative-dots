@@ -3,7 +3,7 @@
 # ==============================================================================
 # Script Versioning & Initialization
 # ==============================================================================
-DOTS_VERSION="1.0.1"
+DOTS_VERSION="1.0.2"
 VERSION_FILE="$HOME/.local/state/imperative-dots-version"
 
 mkdir -p "$(dirname "$VERSION_FILE")"
@@ -41,6 +41,10 @@ FAILED_PKGS=()
 INSTALL_SWAYOSD=false
 INSTALL_NVIM=false
 INSTALL_ZSH=false
+
+DRIVER_CHOICE="Not Set"
+DRIVER_PKGS=()
+HAS_NVIDIA_PROPRIETARY=false
 
 # ==============================================================================
 # Package Arrays
@@ -123,33 +127,34 @@ case $OS in
 esac
 
 # ==============================================================================
-# Hardware Information Gathering & Precise Nvidia Detection
+# Hardware Information Gathering & Universal GPU Detection
 # ==============================================================================
 USER_NAME=$USER
 OS_NAME=$(grep '^PRETTY_NAME=' /etc/os-release | cut -d= -f2 | tr -d '"')
 CPU_INFO=$(grep -m 1 'model name' /proc/cpuinfo | cut -d: -f2 | xargs)
 
-# More robust GPU detection
-GPU_INFO=$(lspci -nnk | grep -i -A2 "VGA compatible controller" | grep -i "NVIDIA" | head -n 1)
-if [[ -z "$GPU_INFO" ]]; then
-    # Fallback to general 3D controller check if VGA isn't matched
-    GPU_INFO=$(lspci -nnk | grep -i -A2 "3D controller" | grep -i "NVIDIA" | head -n 1)
+# Robust generic GPU extraction
+GPU_RAW=$(lspci -nnk | grep -i -A2 "VGA compatible controller" | head -n 1)
+if [[ -z "$GPU_RAW" ]]; then
+    GPU_RAW=$(lspci -nnk | grep -i -A2 "3D controller" | head -n 1)
+fi
+if [[ -z "$GPU_RAW" ]]; then
+    GPU_RAW=$(lspci 2>/dev/null | grep -iE 'vga|3d|display' | head -n 1)
 fi
 
-if [[ -z "$GPU_INFO" ]]; then
-    GPU_INFO=$(lspci 2>/dev/null | grep -iE 'vga|3d|display' | cut -d: -f3 | xargs | head -n 1)
-    [[ -z "$GPU_INFO" ]] && GPU_INFO="Unknown / Virtual Machine"
-    HAS_NVIDIA=false
-else
-    GPU_INFO=$(echo "$GPU_INFO" | cut -d: -f3 | xargs)
-    HAS_NVIDIA=true
-    
-    # Queue essential kernel drivers and wayland compatibility layers
-    if [[ "$OS" == "fedora" ]]; then
-        PKGS+=("akmod-nvidia" "xorg-x11-drv-nvidia-cuda" "egl-wayland")
-    else
-        PKGS+=("nvidia-dkms" "nvidia-utils" "lib32-nvidia-utils" "linux-headers" "egl-wayland")
-    fi
+GPU_INFO=$(echo "$GPU_RAW" | cut -d: -f3 | xargs)
+[[ -z "$GPU_INFO" ]] && GPU_INFO="Unknown / Virtual Machine"
+
+# Categorize GPU for the driver menu
+GPU_VENDOR="Unknown / Generic VM"
+if echo "$GPU_INFO" | grep -qi "nvidia"; then
+    GPU_VENDOR="NVIDIA"
+elif echo "$GPU_INFO" | grep -qi "amd\|radeon"; then
+    GPU_VENDOR="AMD"
+elif echo "$GPU_INFO" | grep -qi "intel"; then
+    GPU_VENDOR="INTEL"
+elif echo "$GPU_INFO" | grep -qi "vmware\|virtualbox\|qxl\|virtio\|bochs"; then
+    GPU_VENDOR="VM"
 fi
 
 # ==============================================================================
@@ -157,7 +162,6 @@ fi
 # ==============================================================================
 
 draw_header() {
-    # Move cursor to top left (\033[H) instead of clearing screen to prevent flashing
     printf "\033[H"
     printf "${BOLD}${C_CYAN}"
     cat << "EOF"
@@ -174,14 +178,10 @@ EOF
     printf "\033[K${BOLD} OS:  ${RESET}              %s\n" "$OS_NAME"
     printf "\033[K${BOLD} CPU: ${RESET}              %s\n" "$CPU_INFO"
     printf "\033[K${BOLD} GPU: ${RESET}              %s\n" "$GPU_INFO"
-    if [ "$HAS_NVIDIA" = true ]; then
-        printf "\033[K${C_GREEN}${BOLD} -> NVIDIA Detected. Advanced Wayland Drivers Queued.${RESET}\n"
-    fi
     printf "\033[K${C_MAGENTA}-----------------------------------------------------------------${RESET}\n"
     printf "\033[K${BOLD} Server Version:${RESET}  %s\n" "$DOTS_VERSION"
     printf "\033[K${BOLD} Local Version: ${RESET}  %s\n" "$LOCAL_VERSION"
     printf "\033[K${C_MAGENTA}=================================================================${RESET}\n\n"
-    # \033[J clears everything below the cursor so fzf renders cleanly
     printf "\033[J"
 }
 
@@ -218,6 +218,96 @@ manage_packages() {
     done
 }
 
+manage_drivers() {
+    while true; do
+        draw_header
+        echo -e "${BOLD}${C_CYAN}=== Hardware Driver Configuration ===${RESET}"
+        echo -e "Detected GPU Vendor: ${BOLD}${C_YELLOW}$GPU_VENDOR${RESET}\n"
+
+        local options=""
+        case "$GPU_VENDOR" in
+            "NVIDIA")
+                options="1. Install Proprietary NVIDIA Drivers (Recommended for Gaming/Wayland)\n2. Install Nouveau (Open Source, Better VM compat)\n3. Skip Driver Installation"
+                ;;
+            "AMD")
+                options="1. Install AMD Mesa & Vulkan Drivers (RADV)\n2. Skip Driver Installation"
+                ;;
+            "INTEL")
+                options="1. Install Intel Mesa & Vulkan Drivers (ANV)\n2. Skip Driver Installation"
+                ;;
+            *)
+                options="1. Install Generic Mesa Drivers (For VMs / Software Rendering)\n2. Skip Driver Installation"
+                ;;
+        esac
+
+        local choice
+        choice=$(echo -e "$options\nBack to Main Menu" | fzf --ansi --layout=reverse --height=12 --prompt="Drivers > " --header="Select the graphics drivers to install")
+
+        if [[ "$choice" == *"Back"* ]]; then break; fi
+
+        # Reset states before configuring
+        DRIVER_PKGS=()
+        HAS_NVIDIA_PROPRIETARY=false
+
+        if [[ "$choice" == *"Proprietary NVIDIA"* ]]; then
+            DRIVER_CHOICE="NVIDIA Proprietary"
+            HAS_NVIDIA_PROPRIETARY=true
+            if [[ "$OS" == "fedora" ]]; then
+                DRIVER_PKGS+=("akmod-nvidia" "xorg-x11-drv-nvidia-cuda" "egl-wayland")
+            else
+                DRIVER_PKGS+=("nvidia-dkms" "nvidia-utils" "lib32-nvidia-utils" "linux-headers" "egl-wayland")
+            fi
+        
+        elif [[ "$choice" == *"Nouveau"* ]]; then
+            DRIVER_CHOICE="NVIDIA Nouveau"
+            if [[ "$OS" == "fedora" ]]; then
+                DRIVER_PKGS+=("mesa-dri-drivers" "mesa-vulkan-drivers")
+            else
+                DRIVER_PKGS+=("mesa" "vulkan-nouveau" "lib32-mesa")
+            fi
+
+        elif [[ "$choice" == *"AMD"* ]]; then
+            DRIVER_CHOICE="AMD Drivers"
+            if [[ "$OS" == "fedora" ]]; then
+                DRIVER_PKGS+=("mesa-dri-drivers" "mesa-vulkan-drivers" "vulkan-radeon" "rocm-opencl")
+            else
+                DRIVER_PKGS+=("mesa" "vulkan-radeon" "lib32-vulkan-radeon" "lib32-mesa" "xf86-video-amdgpu")
+            fi
+
+        elif [[ "$choice" == *"Intel"* ]]; then
+            DRIVER_CHOICE="Intel Drivers"
+            if [[ "$OS" == "fedora" ]]; then
+                DRIVER_PKGS+=("mesa-dri-drivers" "mesa-vulkan-drivers" "vulkan-intel" "intel-media-driver")
+            else
+                DRIVER_PKGS+=("mesa" "vulkan-intel" "lib32-vulkan-intel" "lib32-mesa" "intel-media-driver")
+            fi
+
+        elif [[ "$choice" == *"Generic"* ]]; then
+            DRIVER_CHOICE="Generic / VM"
+            if [[ "$OS" == "fedora" ]]; then
+                DRIVER_PKGS+=("mesa-dri-drivers")
+            else
+                DRIVER_PKGS+=("mesa" "lib32-mesa")
+            fi
+
+        elif [[ "$choice" == *"Skip"* ]]; then
+            echo -e "\n${C_RED}WARNING: Skipping driver installation can result in a completely black screen!${RESET}"
+            echo -n -e "Are you ${BOLD}${C_RED}100% sure${RESET} you want to proceed without graphics drivers? (y/n): "
+            read -r confirm
+            if [[ "$confirm" =~ ^[Yy]$ ]]; then
+                DRIVER_CHOICE="Skipped"
+                DRIVER_PKGS=()
+            else
+                continue
+            fi
+        fi
+
+        echo -e "\n${C_GREEN}Driver configuration saved!${RESET}"
+        sleep 1.2
+        break
+    done
+}
+
 set_keyboard_shortcut() {
     draw_header
     local choice
@@ -248,7 +338,8 @@ set_weather_api() {
         
         if [[ -z "$input_key" ]]; then
             echo -e "\n${C_RED}WARNING: You did not enter an API key.${RESET}"
-            read -p "Are you absolutely sure you want to proceed without it? (y/n): " confirm
+            echo -n -e "Are you ${BOLD}${C_RED}100% sure${RESET} you want to proceed without it? (y/n): "
+            read -r confirm
             if [[ "$confirm" =~ ^[Yy]$ ]]; then
                 WEATHER_API_KEY="Skipped"
                 WEATHER_CITY_ID=""
@@ -366,9 +457,11 @@ while true; do
     elif [[ "$WEATHER_API_KEY" == "Skipped" ]]; then API_DISPLAY="Skipped"
     else API_DISPLAY="Set ($WEATHER_UNIT, ID: $WEATHER_CITY_ID)"; fi
 
-    MENU_OPTION=$(echo -e "1. Manage Packages [${#PKGS[@]} queued]\n2. Set Keyboard Switcher [${KB_SHORTCUT_DISPLAY}]\n3. Set Weather API Key [${API_DISPLAY}]\n4. START INSTALLATION\n5. Exit" | fzf \
+    # We use --ansi flag in fzf so the color codes (like RED for drivers) render properly inside the menu list
+    MENU_OPTION=$(echo -e "1. Manage Packages [${#PKGS[@]} queued]\n2. Set Keyboard Switcher [${KB_SHORTCUT_DISPLAY}]\n3. Set Weather API Key [${API_DISPLAY}]\n4. ${BOLD}${C_RED}[ DRIVERS ]${RESET} Setup [${DRIVER_CHOICE}]\n5. START INSTALLATION\n6. Exit" | fzf \
+        --ansi \
         --layout=reverse \
-        --height=12 \
+        --height=13 \
         --prompt="Main Menu > " \
         --header="Navigate with ARROWS. Select with ENTER.")
 
@@ -376,8 +469,9 @@ while true; do
         *"1"*) manage_packages ;;
         *"2"*) set_keyboard_shortcut ;;
         *"3"*) set_weather_api ;;
-        *"4"*) prompt_optional_features; break ;;
-        *"5"*) clear; exit 0 ;;
+        *"4"*) manage_drivers ;;
+        *"5"*) prompt_optional_features; break ;;
+        *"6"*) clear; exit 0 ;;
         *) exit 0 ;;
     esac
 done
@@ -393,13 +487,19 @@ echo -e "${BOLD}${C_BLUE}::${RESET} ${BOLD}Starting Installation Process...${RES
 echo -e "${C_CYAN}[ INFO ]${RESET} Requesting sudo privileges for installation..."
 sudo -v
 
-# --- 1. Install Dependencies ---
-echo -e "\n${C_CYAN}[ INFO ]${RESET} Installing System Packages...\n"
+# Combine Base Packages with chosen Driver Packages
+ALL_PKGS=("${PKGS[@]}" "${DRIVER_PKGS[@]}")
+
+# --- 1. Install Dependencies & Drivers ---
+echo -e "\n${C_CYAN}[ INFO ]${RESET} Installing System Packages & Drivers...\n"
 if [[ "$OS" == "fedora" ]]; then
     sudo dnf copr enable -y errornointernet/quickshell > /dev/null 2>&1 || true
 fi
 
-for pkg in "${PKGS[@]}"; do
+for pkg in "${ALL_PKGS[@]}"; do
+    # Skip empty entries if any
+    [[ -z "$pkg" ]] && continue 
+
     echo -e "\n${C_CYAN}=================================================================${RESET}"
     echo -e "${C_BLUE}::${RESET} ${BOLD}Installing ${pkg}...${RESET}"
     echo -e "${C_CYAN}=================================================================${RESET}"
@@ -424,8 +524,8 @@ for pkg in "${PKGS[@]}"; do
     sleep 0.5
 done
 
-# --- 1.5. Advanced NVIDIA Setup (CRITICAL FOR WAYLAND) ---
-if [ "$HAS_NVIDIA" = true ]; then
+# --- 1.5. Advanced Proprietary NVIDIA Setup (Only if explicitly selected) ---
+if [ "$HAS_NVIDIA_PROPRIETARY" = true ]; then
     echo -e "\n${C_CYAN}[ INFO ]${RESET} Performing Precise NVIDIA Initialization for Wayland..."
     
     # 1. Blacklist Nouveau
@@ -433,7 +533,7 @@ if [ "$HAS_NVIDIA" = true ]; then
     echo -e "blacklist nouveau\noptions nouveau modeset=0" | sudo tee /etc/modprobe.d/nouveau-blacklist.conf > /dev/null
     
     # 2. Kernel Parameters (modeset=1 fbdev=1 are required to avoid black screens)
-    echo -e "  -> Injecting kernel parameters (nvidia-drm.modeset=1 fbdev=1)..."
+    echo -e "  -> Injecting kernel parameters (nvidia-drm.modeset=1 nvidia-drm.fbdev=1)..."
     if [[ "$OS" == "fedora" ]]; then
         sudo grubby --update-kernel=ALL --args="nvidia-drm.modeset=1 nvidia-drm.fbdev=1"
         printf "  -> Fedora kernel parameters configured %-5s ${C_GREEN}[ OK ]${RESET}\n" ""
@@ -678,8 +778,8 @@ if [ -f "$HYPR_CONF" ]; then
     # 2. Inject Environment Variables for Quickshell
     sed -i "/^env = NIXOS_OZONE_WL,1/a env = WALLPAPER_DIR,$WALLPAPER_DIR\nenv = SCRIPT_DIR,$HOME/.config/hypr/scripts" "$HYPR_CONF"
     
-    # 3. Inject Advanced Nvidia specific configurations
-    if [ "$HAS_NVIDIA" = true ]; then
+    # 3. Inject Advanced Nvidia specific configurations (ONLY IF PROPRIETARY IS CHOSEN)
+    if [ "$HAS_NVIDIA_PROPRIETARY" = true ]; then
         sed -i '/^env = NIXOS_OZONE_WL,1/a env = LIBVA_DRIVER_NAME,nvidia\nenv = XDG_SESSION_TYPE,wayland\nenv = GBM_BACKEND,nvidia-drm\nenv = __GLX_VENDOR_LIBRARY_NAME,nvidia\nenv = WLR_NO_HARDWARE_CURSORS,1\ncursor {\n    no_hardware_cursors = true\n}' "$HYPR_CONF"
     fi
 else
