@@ -11,6 +11,8 @@ THUMB_DIR="$HOME/.cache/wallpaper_picker/thumbs"
 
 IPC_FILE="/tmp/qs_widget_state"
 NETWORK_MODE_FILE="/tmp/qs_network_mode"
+PREV_FOCUS_FILE="/tmp/qs_prev_focus"
+
 ACTION="$1"
 TARGET="$2"
 SUBTARGET="$3"
@@ -148,10 +150,42 @@ if [[ -z "$BAR_PID" ]]; then
 fi
 
 # -----------------------------------------------------------------------------
+# FOCUS MANAGEMENT
+# -----------------------------------------------------------------------------
+save_and_focus_widget() {
+    # Only save if the currently focused window is NOT the widget container
+    local current_window=$(hyprctl activewindow -j 2>/dev/null)
+    local current_title=$(echo "$current_window" | jq -r '.title // empty')
+    local current_addr=$(echo "$current_window" | jq -r '.address // empty')
+
+    if [[ "$current_title" != "qs-master" && -n "$current_addr" && "$current_addr" != "null" ]]; then
+        echo "$current_addr" > "$PREV_FOCUS_FILE"
+    fi
+
+    # Dispatch focus without warping the cursor (run async with a tiny delay to allow QML to move the window first)
+    (
+        sleep 0.05
+        hyprctl --batch "keyword cursor:no_warps true ; dispatch focuswindow title:^qs-master$ ; keyword cursor:no_warps false" >/dev/null 2>&1
+    ) &
+}
+
+restore_focus() {
+    if [[ -f "$PREV_FOCUS_FILE" ]]; then
+        local prev_addr=$(cat "$PREV_FOCUS_FILE")
+        if [[ -n "$prev_addr" && "$prev_addr" != "null" ]]; then
+            # Restore focus to the previous window without warping the cursor
+            hyprctl --batch "keyword cursor:no_warps true ; dispatch focuswindow address:$prev_addr ; keyword cursor:no_warps false" >/dev/null 2>&1
+        fi
+        rm -f "$PREV_FOCUS_FILE"
+    fi
+}
+
+# -----------------------------------------------------------------------------
 # REMAINING ACTIONS (OPEN / CLOSE / TOGGLE)
 # -----------------------------------------------------------------------------
 if [[ "$ACTION" == "close" ]]; then
     echo "close" > "$IPC_FILE"
+    restore_focus
     if [[ "$TARGET" == "network" || "$TARGET" == "all" || -z "$TARGET" ]]; then
         if [ -f "$BT_PID_FILE" ]; then
             kill $(cat "$BT_PID_FILE") 2>/dev/null
@@ -163,6 +197,9 @@ if [[ "$ACTION" == "close" ]]; then
 fi
 
 if [[ "$ACTION" == "open" || "$ACTION" == "toggle" ]]; then
+    ACTIVE_WIDGET=$(cat /tmp/qs_active_widget 2>/dev/null)
+    CURRENT_MODE=$(cat "$NETWORK_MODE_FILE" 2>/dev/null)
+
     # Dynamically fetch focused monitor geometry and adjust for Wayland layout scale
     ACTIVE_MON=$(hyprctl monitors -j | jq -r '.[] | select(.focused==true)')
     MX=$(echo "$ACTIVE_MON" | jq -r '.x // 0')
@@ -173,18 +210,18 @@ if [[ "$ACTION" == "open" || "$ACTION" == "toggle" ]]; then
     MON_DATA="${MX}:${MY}:${MW}:${MH}"
 
     if [[ "$TARGET" == "network" ]]; then
-        ACTIVE_WIDGET=$(cat /tmp/qs_active_widget 2>/dev/null)
-        CURRENT_MODE=$(cat "$NETWORK_MODE_FILE" 2>/dev/null)
-
         if [[ "$ACTION" == "toggle" && "$ACTIVE_WIDGET" == "network" ]]; then
             if [[ -n "$SUBTARGET" ]]; then
                 if [[ "$CURRENT_MODE" == "$SUBTARGET" ]]; then
                     echo "close" > "$IPC_FILE"
+                    restore_focus
                 else
                     echo "$SUBTARGET" > "$NETWORK_MODE_FILE"
+                    save_and_focus_widget
                 fi
             else
                 echo "close" > "$IPC_FILE"
+                restore_focus
             fi
         else
             handle_network_prep
@@ -192,7 +229,15 @@ if [[ "$ACTION" == "open" || "$ACTION" == "toggle" ]]; then
                 echo "$SUBTARGET" > "$NETWORK_MODE_FILE"
             fi
             echo "$TARGET::$MON_DATA" > "$IPC_FILE"
+            save_and_focus_widget
         fi
+        exit 0
+    fi
+
+    # Intercept toggle logic for all other widgets so we can restore focus properly
+    if [[ "$ACTION" == "toggle" && "$ACTIVE_WIDGET" == "$TARGET" ]]; then
+        echo "close" > "$IPC_FILE"
+        restore_focus
         exit 0
     fi
 
@@ -202,5 +247,7 @@ if [[ "$ACTION" == "open" || "$ACTION" == "toggle" ]]; then
     else
         echo "$TARGET::$MON_DATA" > "$IPC_FILE"
     fi
+    
+    save_and_focus_widget
     exit 0
 fi
