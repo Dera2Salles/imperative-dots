@@ -3,7 +3,7 @@
 # ==============================================================================
 # Script Versioning & Initialization
 # ==============================================================================
-DOTS_VERSION="1.0.4"
+DOTS_VERSION="1.0.3"
 VERSION_FILE="$HOME/.local/state/imperative-dots-version"
 
 mkdir -p "$(dirname "$VERSION_FILE")"
@@ -326,39 +326,46 @@ show_overview() {
     clear
     draw_header
     echo -e "${BOLD}${C_MAGENTA}=== System Overview & Keybinds ===${RESET}\n"
-    echo -e "This configuration is an adaptation of the famous ${BOLD}${C_CYAN}ilyamiro/nixos-configuration${RESET} setup."
+    echo -e "This configuration is an adaptation of the ${BOLD}${C_CYAN}ilyamiro/nixos-configuration${RESET} setup."
     echo -e "Here are the core keybindings to navigate your new system once installed:\n"
 
+    # Formatting helper for perfect alignment
+    print_kb() {
+        printf "  ${C_CYAN}[${RESET} ${BOLD}%-17s${RESET} ${C_CYAN}]${RESET}  ${C_YELLOW}➜${RESET}  %s\n" "$1" "$2"
+    }
+
     echo -e "${BOLD}${C_BLUE}--- Applications ---${RESET}"
-    echo -e "  ${BOLD}SUPER + RETURN${RESET}   : Open Terminal (kitty)"
-    echo -e "  ${BOLD}SUPER + D${RESET}        : Open App Launcher (rofi)"
-    echo -e "  ${BOLD}SUPER + F${RESET}        : Open Browser (Firefox)"
-    echo -e "  ${BOLD}SUPER + E${RESET}        : Open File Manager (nautilus)"
-    echo -e "  ${BOLD}SUPER + O${RESET}        : Open Obsidian"
-    echo -e "  ${BOLD}SUPER + T${RESET}        : Open Telegram"
-    echo -e "  ${BOLD}SUPER + C${RESET}        : Clipboard History (rofi)\n"
+    print_kb "SUPER + RETURN" "Open Terminal (kitty)"
+    print_kb "SUPER + D" "Open App Launcher (rofi)"
+    print_kb "SUPER + F" "Open Browser (Firefox)"
+    print_kb "SUPER + E" "Open File Manager (nautilus)"
+    print_kb "SUPER + C" "Clipboard History (rofi)"
+    echo ""
 
     echo -e "${BOLD}${C_BLUE}--- Quickshell Widgets ---${RESET}"
-    echo -e "  ${BOLD}SUPER + M${RESET}        : Toggle Monitors"
-    echo -e "  ${BOLD}SUPER + Q${RESET}        : Toggle Music"
-    echo -e "  ${BOLD}SUPER + B${RESET}        : Toggle Battery"
-    echo -e "  ${BOLD}SUPER + W${RESET}        : Toggle Wallpaper"
-    echo -e "  ${BOLD}SUPER + S${RESET}        : Toggle Calendar"
-    echo -e "  ${BOLD}SUPER + N${RESET}        : Toggle Network"
-    echo -e "  ${BOLD}SUPER + SHIFT + T${RESET}: Toggle FocusTime"
-    echo -e "  ${BOLD}SUPER + SHIFT + S${RESET}: Toggle Stewart\n"
+    print_kb "SUPER + M" "Toggle Monitors"
+    print_kb "SUPER + Q" "Toggle Music"
+    print_kb "SUPER + B" "Toggle Battery"
+    print_kb "SUPER + W" "Toggle Wallpaper"
+    print_kb "SUPER + S" "Toggle Calendar"
+    print_kb "SUPER + N" "Toggle Network"
+    print_kb "SUPER + SHIFT + T" "Toggle FocusTime"
+    print_kb "SUPER + SHIFT + S" "Toggle Stewart"
+    echo ""
 
     echo -e "${BOLD}${C_BLUE}--- Window Management ---${RESET}"
-    echo -e "  ${BOLD}ALT + F4${RESET}         : Close Active Window / Widget"
-    echo -e "  ${BOLD}SUPER + SHIFT + F${RESET}: Toggle Floating"
-    echo -e "  ${BOLD}SUPER + Arrows${RESET}   : Move Focus"
-    echo -e "  ${BOLD}SUPER + CTRL + Arr${RESET}: Move Window\n"
+    print_kb "ALT + F4" "Close Active Window / Widget"
+    print_kb "SUPER + SHIFT + F" "Toggle Floating"
+    print_kb "SUPER + Arrows" "Move Focus"
+    print_kb "SUPER + CTRL + Arr" "Move Window"
+    echo ""
 
     echo -e "${BOLD}${C_BLUE}--- System Controls ---${RESET}"
-    echo -e "  ${BOLD}SUPER + L${RESET}        : Lock Screen"
-    echo -e "  ${BOLD}Print Screen${RESET}     : Screenshot"
-    echo -e "  ${BOLD}SHIFT + Print${RESET}    : Screenshot (Edit)"
-    echo -e "  ${BOLD}ALT + SHIFT${RESET}      : Switch Keyboard Layout\n"
+    print_kb "SUPER + L" "Lock Screen"
+    print_kb "Print Screen" "Screenshot"
+    print_kb "SHIFT + Print" "Screenshot (Edit)"
+    print_kb "ALT + SHIFT" "Switch Keyboard Layout"
+    echo ""
 
     echo -e "${BOLD}${C_GREEN}Press ENTER to return to the Main Menu...${RESET}"
     read -r
