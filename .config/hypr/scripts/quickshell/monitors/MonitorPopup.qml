@@ -38,9 +38,6 @@ Item {
     property int activeEditIndex: 0
     property real uiScale: 0.10 
     
-    // Dynamically tracks whichever monitor is NOT currently selected
-    property int stationaryIndex: monitorsModel.count === 2 ? (activeEditIndex === 0 ? 1 : 0) : 0
-    
     // Wayland Absolute Anchor tracking
     property int originalLayoutOriginX: 0
     property int originalLayoutOriginY: 0
@@ -49,7 +46,6 @@ Item {
         id: monitorsModel
     }
     
-    // Replaced hardcoded accents with dynamic defaults
     property color selectedResAccent: window.mauve
     property color selectedRateAccent: window.blue
 
@@ -64,6 +60,7 @@ Item {
         loops: Animation.Infinite
         running: true
     }
+    
     // -------------------------------------------------------------------------
     // FLUID STARTUP ANIMATIONS 
     // -------------------------------------------------------------------------
@@ -76,16 +73,9 @@ Item {
 
     ParallelAnimation {
         id: startupAnim
-        // Overall window and UI wrapper fades in
         NumberAnimation { target: window; property: "introProgress"; from: 0.0; to: 1.0; duration: 900; easing.type: Easing.OutQuint }
-        
-        // Monitor physical body scales in slightly
         NumberAnimation { target: window; property: "monitorScale"; from: 0.85; to: 1.0; duration: 1200; easing.type: Easing.OutQuint }
-        
-        // UI slides upwards gently into place - INCREASED DURATION FOR SLOWER GLIDE
         NumberAnimation { target: window; property: "uiYOffset"; from: 25; to: 0; duration: 1800; easing.type: Easing.OutQuint }
-        
-        // Inner screen contents fade in slower (powering on effect)
         NumberAnimation { target: window; property: "screenLight"; from: 0.0; to: 1.0; duration: 1500; easing.type: Easing.InOutQuad }
     }
     property bool applyHovered: false
@@ -95,7 +85,24 @@ Item {
         menuTransitionAnim.restart();
     }
 
-    // MATHEMATICAL PERIMETER GLUE: Forces a proposed coordinate to perfectly touch the stationary monitor
+    // -------------------------------------------------------------------------
+    // MATHEMATICAL PERIMETER GLUE
+    // -------------------------------------------------------------------------
+    function isOverlapping(ax, ay, aw, ah, bx, by, bw, bh) {
+        return ax < bx + bw && ax + aw > bx && ay < by + bh && ay + ah > by;
+    }
+
+    function isOverlappingAny(x, y, w, h, skipIdx) {
+        for (let i = 0; i < monitorsModel.count; i++) {
+            if (i === skipIdx) continue;
+            let m = monitorsModel.get(i);
+            let mW = (m.resW / m.sysScale) * window.uiScale;
+            let mH = (m.resH / m.sysScale) * window.uiScale;
+            if (isOverlapping(x, y, w, h, m.uiX, m.uiY, mW, mH)) return true;
+        }
+        return false;
+    }
+
     function getPerimeterSnap(pX, pY, sX, sY, sW, sH, mW, mH, snapT) {
         let edges = [
             { x1: sX - mW, x2: sX + sW, y1: sY - mH, y2: sY - mH }, // Top Edge
@@ -133,27 +140,40 @@ Item {
     }
 
     function forceLayoutUpdate() {
-        if (monitorsModel.count === 2) {
-            let mIdx = window.activeEditIndex;
-            let sIdx = window.stationaryIndex;
-            
-            let sModel = monitorsModel.get(sIdx);
-            let mModel = monitorsModel.get(mIdx);
-            
+        if (monitorsModel.count < 2) return;
+        
+        let mIdx = window.activeEditIndex;
+        let mModel = monitorsModel.get(mIdx);
+        let mW = (mModel.resW / mModel.sysScale) * window.uiScale;
+        let mH = (mModel.resH / mModel.sysScale) * window.uiScale;
+
+        let bestX = mModel.uiX;
+        let bestY = mModel.uiY;
+        let bestDist = 999999;
+
+        // Loop through ALL other monitors to find the closest valid snap
+        for (let i = 0; i < monitorsModel.count; i++) {
+            if (i === mIdx) continue;
+            let sModel = monitorsModel.get(i);
             let sW = (sModel.resW / sModel.sysScale) * window.uiScale;
             let sH = (sModel.resH / sModel.sysScale) * window.uiScale;
-            let mW = (mModel.resW / mModel.sysScale) * window.uiScale;
-            let mH = (mModel.resH / mModel.sysScale) * window.uiScale;
             
             let snapped = window.getPerimeterSnap(
-                mModel.uiX, mModel.uiY, 
-                sModel.uiX, sModel.uiY, 
+                mModel.uiX, mModel.uiY,
+                sModel.uiX, sModel.uiY,
                 sW, sH, mW, mH, 20
             );
             
-            monitorsModel.setProperty(mIdx, "uiX", snapped.x);
-            monitorsModel.setProperty(mIdx, "uiY", snapped.y);
+            let dist = Math.hypot(snapped.x - mModel.uiX, snapped.y - mModel.uiY);
+            if (dist < bestDist) {
+                bestDist = dist;
+                bestX = snapped.x;
+                bestY = snapped.y;
+            }
         }
+
+        monitorsModel.setProperty(mIdx, "uiX", bestX);
+        monitorsModel.setProperty(mIdx, "uiY", bestY);
     }
 
     Timer {
@@ -361,7 +381,6 @@ Item {
                                 color: window.surface0
                                 clip: true
 
-                                // This inner block handles the "powering on" visual delay
                                 Rectangle {
                                     anchors.fill: parent
                                     color: "transparent"
@@ -431,7 +450,7 @@ Item {
                 }
 
                 // --------------------------------------------------
-                // MODE 2: MULTI-MONITOR
+                // MODE 2: MULTI-MONITOR (3+ Supported)
                 // --------------------------------------------------
                 Item {
                     anchors.fill: parent
@@ -455,53 +474,58 @@ Item {
                             }
                         }
 
-                        // Perfect mathematical scale: Centers the Bounding Box of both monitors
+                        // Perfect mathematical scale: Centers the Bounding Box of ALL monitors
                         property real targetScale: {
                             if (monitorsModel.count < 2) return 1.0;
-                            let sModel = monitorsModel.get(window.stationaryIndex);
-                            let mModel = monitorsModel.get(window.activeEditIndex);
-                            let sW = (sModel.resW / sModel.sysScale) * window.uiScale;
-                            let sH = (sModel.resH / sModel.sysScale) * window.uiScale;
-                            let mW = (mModel.resW / mModel.sysScale) * window.uiScale;
-                            let mH = (mModel.resH / mModel.sysScale) * window.uiScale;
-
-                            let minX = Math.min(sModel.uiX, mModel.uiX);
-                            let minY = Math.min(sModel.uiY, mModel.uiY);
-                            let maxX = Math.max(sModel.uiX + sW, mModel.uiX + mW);
-                            let maxY = Math.max(sModel.uiY + sH, mModel.uiY + mH);
-
-                            let requiredW = (maxX - minX) + 80; 
+                            let minX = 999999, minY = 999999, maxX = -999999, maxY = -999999;
+                            
+                            for (let i = 0; i < monitorsModel.count; i++) {
+                                let m = monitorsModel.get(i);
+                                let w = (m.resW / m.sysScale) * window.uiScale;
+                                let h = (m.resH / m.sysScale) * window.uiScale;
+                                
+                                minX = Math.min(minX, m.uiX);
+                                minY = Math.min(minY, m.uiY);
+                                maxX = Math.max(maxX, m.uiX + w);
+                                maxY = Math.max(maxY, m.uiY + h);
+                            }
+                            
+                            let requiredW = (maxX - minX) + 80;
                             let requiredH = (maxY - minY) + 80;
-
+                            
                             return Math.min(1.8, Math.min(340 / requiredW, 240 / requiredH));
                         }
-                        
-                        // Centering math: Keep the bounding box perfectly centered in the 380x280 view
+
+                        // Centering math: Keep the bounding box of ALL monitors perfectly centered in the 380x280 view
                         property real offsetX: {
                             if (monitorsModel.count < 2) return 0;
-                            let sModel = monitorsModel.get(window.stationaryIndex);
-                            let mModel = monitorsModel.get(window.activeEditIndex);
-                            let sW = (sModel.resW / sModel.sysScale) * window.uiScale;
-                            let mW = (mModel.resW / mModel.sysScale) * window.uiScale;
+                            let minX = 999999, maxX = -999999;
                             
-                            let minX = Math.min(sModel.uiX, mModel.uiX);
-                            let maxX = Math.max(sModel.uiX + sW, mModel.uiX + mW);
+                            for (let i = 0; i < monitorsModel.count; i++) {
+                                let m = monitorsModel.get(i);
+                                let w = (m.resW / m.sysScale) * window.uiScale;
+                                
+                                minX = Math.min(minX, m.uiX);
+                                maxX = Math.max(maxX, m.uiX + w);
+                            }
+                            
                             let centerX = minX + (maxX - minX) / 2;
-                            
                             return 190 - (centerX * targetScale);
                         }
-                        
+
                         property real offsetY: {
                             if (monitorsModel.count < 2) return 0;
-                            let sModel = monitorsModel.get(window.stationaryIndex);
-                            let mModel = monitorsModel.get(window.activeEditIndex);
-                            let sH = (sModel.resH / sModel.sysScale) * window.uiScale;
-                            let mH = (mModel.resH / mModel.sysScale) * window.uiScale;
+                            let minY = 999999, maxY = -999999;
                             
-                            let minY = Math.min(sModel.uiY, mModel.uiY);
-                            let maxY = Math.max(sModel.uiY + sH, mModel.uiY + mH);
+                            for (let i = 0; i < monitorsModel.count; i++) {
+                                let m = monitorsModel.get(i);
+                                let h = (m.resH / m.sysScale) * window.uiScale;
+                                
+                                minY = Math.min(minY, m.uiY);
+                                maxY = Math.max(maxY, m.uiY + h);
+                            }
+                            
                             let centerY = minY + (maxY - minY) / 2;
-                            
                             return 140 - (centerY * targetScale);
                         }
 
@@ -607,33 +631,59 @@ Item {
                                             }
 
                                             onPositionChanged: {
-                                                if (drag.active && monitorsModel.count === 2) {
-                                                    let sIdx = window.stationaryIndex;
-                                                    let sModel = monitorsModel.get(sIdx);
-                                                    
-                                                    let sW = (sModel.resW / sModel.sysScale) * window.uiScale;
-                                                    let sH = (sModel.resH / sModel.sysScale) * window.uiScale;
+                                                if (drag.active && monitorsModel.count >= 2) {
                                                     let mW = monitorCard.width;
                                                     let mH = monitorCard.height;
 
-                                                    // Hard boundary limit: Stop the ghost from flying infinitely off the canvas
+                                                    // Compute boundary limits dynamically against ALL other monitors
                                                     let padding = 40;
-                                                    let minX = sModel.uiX - mW - padding;
-                                                    let maxX = sModel.uiX + sW + padding;
-                                                    let minY = sModel.uiY - mH - padding;
-                                                    let maxY = sModel.uiY + sH + padding;
+                                                    let boundMinX = 999999, boundMinY = 999999;
+                                                    let boundMaxX = -999999, boundMaxY = -999999;
+                                                    
+                                                    for (let j = 0; j < monitorsModel.count; j++) {
+                                                        if (j === index) continue;
+                                                        let sModel = monitorsModel.get(j);
+                                                        let sW = (sModel.resW / sModel.sysScale) * window.uiScale;
+                                                        let sH = (sModel.resH / sModel.sysScale) * window.uiScale;
+                                                        
+                                                        boundMinX = Math.min(boundMinX, sModel.uiX - mW - padding);
+                                                        boundMinY = Math.min(boundMinY, sModel.uiY - mH - padding);
+                                                        boundMaxX = Math.max(boundMaxX, sModel.uiX + sW + padding);
+                                                        boundMaxY = Math.max(boundMaxY, sModel.uiY + sH + padding);
+                                                    }
 
-                                                    ghostDrag.x = Math.max(minX, Math.min(ghostDrag.x, maxX));
-                                                    ghostDrag.y = Math.max(minY, Math.min(ghostDrag.y, maxY));
+                                                    ghostDrag.x = Math.max(boundMinX, Math.min(ghostDrag.x, boundMaxX));
+                                                    ghostDrag.y = Math.max(boundMinY, Math.min(ghostDrag.y, boundMaxY));
+
+                                                    // Snap to the nearest perimeter of ANY other monitor
+                                                    let bestX = ghostDrag.x;
+                                                    let bestY = ghostDrag.y;
+                                                    let bestDist = 999999;
                                                     
-                                                    let snapped = window.getPerimeterSnap(
-                                                        ghostDrag.x, ghostDrag.y, 
-                                                        sModel.uiX, sModel.uiY, 
-                                                        sW, sH, mW, mH, 20
-                                                    );
-                                                    
-                                                    monitorsModel.setProperty(index, "uiX", snapped.x);
-                                                    monitorsModel.setProperty(index, "uiY", snapped.y);
+                                                    for (let j = 0; j < monitorsModel.count; j++) {
+                                                        if (j === index) continue;
+                                                        let sModel = monitorsModel.get(j);
+                                                        let sW = (sModel.resW / sModel.sysScale) * window.uiScale;
+                                                        let sH = (sModel.resH / sModel.sysScale) * window.uiScale;
+                                                        
+                                                        let snapped = window.getPerimeterSnap(
+                                                            ghostDrag.x, ghostDrag.y,
+                                                            sModel.uiX, sModel.uiY,
+                                                            sW, sH, mW, mH, 20
+                                                        );
+                                                        
+                                                        let dist = Math.hypot(ghostDrag.x - snapped.x, ghostDrag.y - snapped.y);
+                                                        if (dist < bestDist) {
+                                                            bestDist = dist;
+                                                            bestX = snapped.x;
+                                                            bestY = snapped.y;
+                                                        }
+                                                    }
+
+                                                    if (!window.isOverlappingAny(bestX, bestY, mW, mH, index)) {
+                                                        monitorsModel.setProperty(index, "uiX", bestX);
+                                                        monitorsModel.setProperty(index, "uiY", bestY);
+                                                    }
                                                 }
                                             }
 
@@ -661,7 +711,6 @@ Item {
                 anchors.rightMargin: 30
                 height: 310
 
-                // UI block animates upwards fluidly safely without breaking the GridLayout
                 opacity: window.introProgress
                 transform: Translate { y: window.uiYOffset }
 
@@ -794,8 +843,8 @@ Item {
                         Layout.leftMargin: 10
                         Layout.rightMargin: 10
                         
-                        property var rates: [60, 75, 100, 120, 144, 240]
-                        property var rateColors: [window.red, window.mauve, window.blue, window.sapphire, window.teal, window.green]
+                        property var rates: [60, 75, 100, 120, 144, 165, 180, 240, 360]
+                        property var rateColors: [window.red, window.mauve, window.blue, window.sapphire, window.teal, window.pink, window.yellow, window.green, window.peach]
                         
                         property int currentIndex: {
                             if (monitorsModel.count === 0) return 0;
@@ -922,7 +971,6 @@ Item {
                 width: 170
                 height: 50
                 
-                // Matches the right side panel animation
                 opacity: window.introProgress
                 transform: Translate { y: window.uiYOffset }
 
@@ -1018,7 +1066,7 @@ Item {
 
                         if (monitorsModel.count === 1) {
                             let mon = monitorsModel.get(0);
-                            let monitorStr = mon.name + "," + mon.resW + "x" + mon.resH + "@" + mon.rate + ",auto," + mon.sysScale;
+                            let monitorStr = mon.name + "," + mon.resW + "x" + mon.resH + "@" + mon.rate + ",0x0," + mon.sysScale;
                             Quickshell.execDetached(["notify-send", "Display Update", "Applied: " + mon.resW + "x" + mon.resH + " @ " + mon.rate + "Hz"]);
                             Quickshell.execDetached(["sh", "-c", "hyprctl keyword monitor " + monitorStr]);
                         } else {
@@ -1036,20 +1084,47 @@ Item {
                                 });
                             }
                             
-                            if (rects.length === 2) {
-                                let r0 = rects[0];
-                                let r1 = rects[1];
+                            // Tight Snap Pass: Close tiny floating gaps between ANY adjacent monitors
+                            function getTightSnap(pX, pY, sX, sY, sW, sH, mW, mH, t) {
+                                let cx = pX; let cy = pY;
+                                if (Math.abs(cx - (sX - mW)) < t) cx = sX - mW;
+                                else if (Math.abs(cx - (sX + sW)) < t) cx = sX + sW;
+                                else if (Math.abs(cx - sX) < t) cx = sX;
+                                else if (Math.abs(cx - (sX + sW - mW)) < t) cx = sX + sW - mW;
+                                else if (Math.abs(cx - (sX + sW/2 - mW/2)) < t) cx = sX + sW/2 - mW/2;
                                 
-                                let snapped = window.getPerimeterSnap(
-                                    r1.x, r1.y, 
-                                    r0.x, r0.y, 
-                                    r0.w, r0.h, r1.w, r1.h, 200 
-                                );
+                                if (Math.abs(cy - (sY - mH)) < t) cy = sY - mH;
+                                else if (Math.abs(cy - (sY + sH)) < t) cy = sY + sH;
+                                else if (Math.abs(cy - sY) < t) cy = sY;
+                                else if (Math.abs(cy - (sY + sH - mH)) < t) cy = sY + sH - mH;
+                                else if (Math.abs(cy - (sY + sH/2 - mH/2)) < t) cy = sY + sH/2 - mH/2;
                                 
-                                r1.x = Math.round(snapped.x);
-                                r1.y = Math.round(snapped.y);
+                                return {x: cx, y: cy};
                             }
 
+                            for (let i = 1; i < rects.length; i++) {
+                                let bestX = rects[i].x;
+                                let bestY = rects[i].y;
+                                let bestDist = 999999;
+                                for (let j = 0; j < i; j++) {
+                                    let r0 = rects[j];
+                                    let snapped = getTightSnap(
+                                        rects[i].x, rects[i].y,
+                                        r0.x, r0.y,
+                                        r0.w, r0.h, rects[i].w, rects[i].h, 25
+                                    );
+                                    let dist = Math.hypot(rects[i].x - snapped.x, rects[i].y - snapped.y);
+                                    if (dist < bestDist) {
+                                        bestDist = dist;
+                                        bestX = Math.round(snapped.x);
+                                        bestY = Math.round(snapped.y);
+                                    }
+                                }
+                                rects[i].x = bestX;
+                                rects[i].y = bestY;
+                            }
+
+                            // CORE HYPRLAND FIX: Find absolute bounding box minimums to force a 0x0 anchor
                             let finalMinX = 999999;
                             let finalMinY = 999999;
                             for (let i = 0; i < rects.length; i++) {
@@ -1062,8 +1137,9 @@ Item {
                             for (let i = 0; i < rects.length; i++) {
                                 let r = rects[i];
                                 
-                                r.x = Math.round((r.x - finalMinX) + window.originalLayoutOriginX);
-                                r.y = Math.round((r.y - finalMinY) + window.originalLayoutOriginY);
+                                // CORE HYPRLAND FIX: Subtract the minimum so the entire layout grid starts at exactly 0x0.
+                                r.x = Math.round(r.x - finalMinX);
+                                r.y = Math.round(r.y - finalMinY);
                                 
                                 let monitorStr = r.name + "," + r.resW + "x" + r.resH + "@" + r.rate + "," + r.x + "x" + r.y + "," + r.sysScale;
                                 batchCmds.push("keyword monitor " + monitorStr);
@@ -1071,7 +1147,10 @@ Item {
                             }
                             
                             let fullCommand = "hyprctl --batch '" + batchCmds.join(" ; ") + "'";
-                            Quickshell.execDetached(["sh", "-c", fullCommand]);
+                            
+                            let postReloadCmd = "awww kill ; sleep 0.1 ; awww-daemon &";
+                            
+                            Quickshell.execDetached(["sh", "-c", fullCommand + " ; " + postReloadCmd]);
                             Quickshell.execDetached(["notify-send", "Display Update", "Applied layout for: " + summaryString]);
                         }
                     }
