@@ -997,7 +997,7 @@ fi
 
 # 4. Patch WallpaperPicker.qml dynamically
 if [ -f "$WP_QML" ]; then
-    sed -i 's|Quickshell.env("HOME") + "/Images/Wallpapers"|Quickshell.env("WALLPAPER_DIR")|g' "$WP_QML"
+    sed -i 's|Quickshell.env("HOME") + "/Pictures/Wallpapers"|Quickshell.env("WALLPAPER_DIR")|g' "$WP_QML"
 fi
 
 # 5. Rename all instances of swww to awww in quickshell/wallpaper files
