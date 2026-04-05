@@ -15,9 +15,11 @@ fi
 # Fetch default sink details (Supports both PipeWire and PulseAudio)
 if command -v wpctl >/dev/null; then
     SINK_INFO=$(wpctl status | grep -A 5 "Sinks:" | grep "\*" | head -n1)
-    VOL_STR=$(wpctl get-volume @DEFAULT_AUDIO_SINK@)
-    VOL_RAW=$(echo "$VOL_STR" | awk '{print $2}')
-    VOL_PCT=$(echo "$VOL_RAW * 100" | bc | cut -d. -f1)
+    VOL_STR=$(wpctl get-volume @DEFAULT_AUDIO_SINK@ 2>/dev/null)
+    
+    # FIX: Replaced 'bc' with 'awk' for math, and added strict regex matching for the decimal
+    VOL_PCT=$(echo "$VOL_STR" | grep -oP '\d+\.\d+' | awk '{print int($1*100)}')
+    
     MUTED=false
     if [[ "$VOL_STR" == *"[MUTED]"* ]]; then MUTED=true; fi
     NAME=$(echo "$SINK_INFO" | sed -E 's/.*\* +[0-9]+. +//')

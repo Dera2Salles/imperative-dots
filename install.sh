@@ -841,6 +841,7 @@ sudo cp -r ~/.local/share/fonts/IosevkaNerdFont /usr/share/fonts/
 printf "  -> Cleaning up temporary files... \n"
 rm -rf /tmp/iosevka-pack
 rm -f ~/.local/share/fonts/IosevkaNerdFont/*Mono*.ttf
+rm -f "$HOME/.cache/wallpaper_initialized" # if reinstalling
 
 # Fix permissions so fontconfig can actually read them
 find "$TARGET_FONTS_DIR" -type f -exec chmod 644 {} \; 2>/dev/null
