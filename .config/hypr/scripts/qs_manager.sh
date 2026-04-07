@@ -1,3 +1,4 @@
+
 #!/usr/bin/env bash
 
 # -----------------------------------------------------------------------------
@@ -6,7 +7,7 @@
 QS_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
 BT_PID_FILE="$HOME/.cache/bt_scan_pid"
 BT_SCAN_LOG="$HOME/.cache/bt_scan.log"
-SRC_DIR="$HOME/Pictures/Wallpapers"
+SRC_DIR="$HOME/Images/Wallpapers"
 THUMB_DIR="$HOME/.cache/wallpaper_picker/thumbs"
 
 IPC_FILE="/tmp/qs_widget_state"
@@ -18,42 +19,17 @@ TARGET="$2"
 SUBTARGET="$3"
 
 # -----------------------------------------------------------------------------
-# HYPRLAND 0.54+ FIX: ASYNC HIDE WITH FOCUS RE-ASSERTION
+# NEW HELPER: HIDE WIDGET PROPERLY (FULLY ASYNC)
 # -----------------------------------------------------------------------------
-# In Hyprland 0.54+, moving a window to a special workspace triggers a focus 
-# recalculation that can drop focus. We pass the previous address into this 
-# function to explicitly re-assert focus AFTER the window is moved.
+# We run the hyprctl move entirely in the background. The 0.15s sleep allows
+# the QML fade-out animation to finish smoothly before the window is yanked
+# away, while returning control to bash in 0.000 seconds.
 hide_widget_async() {
-    local prev_addr="$1"
     echo "close" > "$IPC_FILE"
-    
-    # HYPRLAND 0.54+ FIX: Grab exact hex address to prevent regex matching failures
-    local qs_addr=$(hyprctl clients -j | jq -r '.[] | select(.title == "qs-master") | .address' | head -n 1)
-
     (
         sleep 0.15
-        if [[ -n "$qs_addr" ]]; then
-            hyprctl dispatch movetoworkspacesilent "special:qs-hidden,address:$qs_addr" >/dev/null 2>&1
-        fi
-        
-        # Re-assert focus after the window tree changes to prevent focus drops
-        if [[ -n "$prev_addr" && "$prev_addr" != "null" ]]; then
-            hyprctl --batch "keyword cursor:no_warps true ; dispatch focuswindow address:$prev_addr ; keyword cursor:no_warps false" >/dev/null 2>&1
-        fi
+        hyprctl dispatch movetoworkspacesilent special:qs-hidden,title:^qs-master$ >/dev/null 2>&1
     ) &
-}
-
-restore_focus() {
-    local prev_addr=""
-    if [[ -f "$PREV_FOCUS_FILE" ]]; then
-        prev_addr=$(cat "$PREV_FOCUS_FILE")
-        if [[ -n "$prev_addr" && "$prev_addr" != "null" ]]; then
-            hyprctl --batch "keyword cursor:no_warps true ; dispatch focuswindow address:$prev_addr ; keyword cursor:no_warps false" >/dev/null 2>&1
-        fi
-        rm -f "$PREV_FOCUS_FILE"
-    fi
-    # Echo the address so hide_widget_async can use it for the double-check
-    echo "$prev_addr"
 }
 
 # -----------------------------------------------------------------------------
@@ -63,15 +39,8 @@ if [[ "$ACTION" =~ ^[0-9]+$ ]]; then
     WORKSPACE_NUM="$ACTION"
     MOVE_OPT="$2"
     
-    echo "close" > "$IPC_FILE"
-
-    # HYPRLAND 0.54+ FIX: For workspace switching, we skip the 0.15s animation sleep 
-    # and banish the widget instantly. This prevents the delayed window move from 
-    # stealing focus on the newly activated workspace.
-    QS_ADDR=$(hyprctl clients -j | jq -r '.[] | select(.title == "qs-master") | .address' | head -n 1)
-    if [[ -n "$QS_ADDR" ]]; then
-        hyprctl dispatch movetoworkspacesilent "special:qs-hidden,address:$QS_ADDR" >/dev/null 2>&1
-    fi
+    # Fire the async hide function so it doesn't block this script AT ALL
+    hide_widget_async
     
     CMD="workspace $WORKSPACE_NUM"
     [[ "$MOVE_OPT" == "move" ]] && CMD="movetoworkspace $WORKSPACE_NUM"
@@ -83,8 +52,7 @@ if [[ "$ACTION" =~ ^[0-9]+$ ]]; then
     else
         hyprctl --batch "dispatch $CMD" >/dev/null 2>&1
     fi
-    
-    rm -f "$PREV_FOCUS_FILE"
+
     exit 0
 fi
 
@@ -216,18 +184,28 @@ save_and_focus_widget() {
     # Dispatch focus without warping the cursor (run async with a tiny delay to allow QML to move the window first)
     (
         sleep 0.05
-        # FOOLPROOF FIX: Pull the widget back from the hidden workspace to the active one silently, THEN focus it.
-        hyprctl --batch "keyword cursor:no_warps true ; dispatch movetoworkspacesilent $active_ws,title:^qs-master$ ; dispatch focuswindow title:^qs-master$ ; keyword cursor:no_warps false" >/dev/null 2>&1
+        # FOOLPROOF FIX: Pull the widget back from the hidden workspace to the active one silently, force its Z-order to the top, THEN focus it.
+        hyprctl --batch "keyword cursor:no_warps true ; dispatch movetoworkspacesilent $active_ws,title:^qs-master$ ; dispatch alterzorder top,title:^qs-master$ ; dispatch focuswindow title:^qs-master$ ; keyword cursor:no_warps false" >/dev/null 2>&1
     ) &
+}
+
+restore_focus() {
+    if [[ -f "$PREV_FOCUS_FILE" ]]; then
+        local prev_addr=$(cat "$PREV_FOCUS_FILE")
+        if [[ -n "$prev_addr" && "$prev_addr" != "null" ]]; then
+            # Restore focus to the previous window without warping the cursor
+            hyprctl --batch "keyword cursor:no_warps true ; dispatch focuswindow address:$prev_addr ; keyword cursor:no_warps false" >/dev/null 2>&1
+        fi
+        rm -f "$PREV_FOCUS_FILE"
+    fi
 }
 
 # -----------------------------------------------------------------------------
 # REMAINING ACTIONS (OPEN / CLOSE / TOGGLE)
 # -----------------------------------------------------------------------------
 if [[ "$ACTION" == "close" ]]; then
-    PREV=$(restore_focus)
-    hide_widget_async "$PREV"
-    
+    hide_widget_async
+    restore_focus
     if [[ "$TARGET" == "network" || "$TARGET" == "all" || -z "$TARGET" ]]; then
         if [ -f "$BT_PID_FILE" ]; then
             kill $(cat "$BT_PID_FILE") 2>/dev/null
@@ -256,15 +234,15 @@ if [[ "$ACTION" == "open" || "$ACTION" == "toggle" ]]; then
         if [[ "$ACTION" == "toggle" && "$ACTIVE_WIDGET" == "network" ]]; then
             if [[ -n "$SUBTARGET" ]]; then
                 if [[ "$CURRENT_MODE" == "$SUBTARGET" ]]; then
-                    PREV=$(restore_focus)
-                    hide_widget_async "$PREV"
+                    hide_widget_async
+                    restore_focus
                 else
                     echo "$SUBTARGET" > "$NETWORK_MODE_FILE"
                     save_and_focus_widget
                 fi
             else
-                PREV=$(restore_focus)
-                hide_widget_async "$PREV"
+                hide_widget_async
+                restore_focus
             fi
         else
             handle_network_prep
@@ -279,8 +257,8 @@ if [[ "$ACTION" == "open" || "$ACTION" == "toggle" ]]; then
 
     # Intercept toggle logic for all other widgets so we can restore focus properly
     if [[ "$ACTION" == "toggle" && "$ACTIVE_WIDGET" == "$TARGET" ]]; then
-        PREV=$(restore_focus)
-        hide_widget_async "$PREV"
+        hide_widget_async
+        restore_focus
         exit 0
     fi
 
@@ -294,3 +272,4 @@ if [[ "$ACTION" == "open" || "$ACTION" == "toggle" ]]; then
     save_and_focus_widget
     exit 0
 fi
+
