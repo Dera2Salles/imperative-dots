@@ -316,14 +316,18 @@ Item {
 
     function getCleanName(name) {
         if (!name) return "";
-        let clean = String(name);
-        return clean.startsWith("000_") ? clean.substring(4) : clean;
+        // Decode URI components in case the IPC passed a URL-encoded string
+        let clean = decodeURIComponent(String(name));
+        // Strip out the absolute path directories to get just the file name
+        let baseName = clean.substring(clean.lastIndexOf('/') + 1);
+        return baseName.startsWith("000_") ? baseName.substring(4) : baseName;
     }
 
     function isDownloaded(name) {
         if (!name) return false;
+        let targetName = window.getCleanName(name);
         for (let i = 0; i < srcModel.count; i++) {
-            if (srcModel.get(i, "fileName") === name) return true;
+            if (window.getCleanName(srcModel.get(i, "fileName")) === targetName) return true;
         }
         return false;
     }
@@ -380,8 +384,7 @@ Item {
             let finalIndex = foundIndex !== -1 ? foundIndex : 0;
             window.executeFocusRestore(finalIndex, false, true);
         }
-    }
-    
+    }    
     function trySearchFocus() {
         if (window.searchIndexRestored || searchProxyModel.count === 0) return;
 
