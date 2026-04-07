@@ -57,7 +57,6 @@ PanelWindow {
         return Registry.getLayout(name, 0, 0, Screen.width, Screen.height);
     }
 
-    // --- RESTORED: SELF-HEALING GEOMETRY ---
     // Automatically recalculates position and scale if the OS resolution changes
     Connections {
         target: Screen
@@ -99,6 +98,10 @@ PanelWindow {
 
         opacity: masterWindow.isVisible ? 1.0 : 0.0
         Behavior on opacity { NumberAnimation { duration: masterWindow.isWallpaperTransition ? 150 : (masterWindow.morphDuration === 500 ? 300 : 200); easing.type: Easing.InOutSine } }
+
+        MouseArea {
+            anchors.fill: parent
+        }
 
         Item {
             anchors.centerIn: parent

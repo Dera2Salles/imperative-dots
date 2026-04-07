@@ -24,28 +24,42 @@ send_notification() {
 
 # Parse arguments
 EDIT_MODE=false
+FULL_MODE=false
 for arg in "$@"; do
     case $arg in
         --edit) EDIT_MODE=true ;;
+        --full) FULL_MODE=true ;;
     esac
 done
 
-# 1. Select Region first. If user presses Esc, this variable will be empty.
-GEOMETRY=$(slurp $SLURP_ARGS)
+# Handle geometry if not in full screen mode
+if [ "$FULL_MODE" = false ]; then
+    # 1. Select Region first. If user presses Esc, this variable will be empty.
+    GEOMETRY=$(slurp $SLURP_ARGS)
 
-# 2. Check if selection was cancelled
-if [ -z "$GEOMETRY" ]; then
-    exit 0
+    # 2. Check if selection was cancelled
+    if [ -z "$GEOMETRY" ]; then
+        exit 0
+    fi
 fi
 
+# Helper function to run grim with or without region selection
+capture_screen() {
+    if [ "$FULL_MODE" = true ]; then
+        grim -
+    else
+        grim -g "$GEOMETRY" -
+    fi
+}
+
 if [ "$EDIT_MODE" = true ]; then
-    # Edit Mode: Capture region -> Open in Satty
-    grim -g "$GEOMETRY" - | GSK_RENDERER=gl satty --filename - --output-filename "$FILENAME" --init-tool brush --copy-command wl-copy
+    # Edit Mode: Capture -> Open in Satty
+    capture_screen | GSK_RENDERER=gl satty --filename - --output-filename "$FILENAME" --init-tool brush --copy-command wl-copy
     
     send_notification
 else
-    # Standard Mode: Capture region -> Save to file -> Copy to clipboard
-    grim -g "$GEOMETRY" - | tee "$FILENAME" | wl-copy
+    # Standard Mode: Capture -> Save to file -> Copy to clipboard
+    capture_screen | tee "$FILENAME" | wl-copy
     
     send_notification
 fi
