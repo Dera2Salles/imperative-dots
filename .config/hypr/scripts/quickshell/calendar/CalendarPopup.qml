@@ -340,6 +340,13 @@ Item {
                     schedulePoller.running = true; // Safe to start polling
                 } else {
                     window.scheduleModuleExists = false;
+                    
+                    // --- DYNAMICALLY SHRINK THE WINDOW ---
+                    // The registry defaults to s(750). The bottom section is s(240).
+                    // We shrink the Quickshell Window wrapper to s(510) to crop it out.
+                    if (Window.window) {
+                        Window.window.height = window.s(510);
+                    }
                 }
             }
         }
