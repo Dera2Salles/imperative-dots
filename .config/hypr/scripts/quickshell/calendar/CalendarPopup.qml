@@ -48,7 +48,6 @@ Item {
         }
     }
 
-  
     // -------------------------------------------------------------------------
     // COLORS (Dynamic Matugen Palette)
     // -------------------------------------------------------------------------
@@ -328,7 +327,10 @@ Item {
     property bool scheduleModuleExists: false
     property var scheduleData: { "header": "Loading Schedule...", "link": "", "lessons": [] }
 
-    // Check if the schedule manager script actually exists before doing anything
+    // Dynamic offset based on whether the schedule module exists
+    property real centerOffset: window.scheduleModuleExists ? window.s(-100) : 0
+    Behavior on centerOffset { NumberAnimation { duration: 600; easing.type: Easing.OutQuart } }
+
     // Check if the schedule manager script actually exists before doing anything
     Process {
         id: schedulePathChecker
@@ -354,6 +356,7 @@ Item {
             }
         }
     }
+
     Process {
         id: schedulePoller
         command: ["bash", window.scriptsDir + "/schedule/schedule_manager.sh"]
@@ -507,7 +510,7 @@ Item {
             // Big Parallax Weather Icon (Tied to Weather Transition)
             Text {
                 anchors.centerIn: parent
-                anchors.verticalCenterOffset: window.s(-100)
+                anchors.verticalCenterOffset: window.centerOffset
                 text: window.weatherData && window.weatherData.forecast[window.weatherView] ? window.weatherData.forecast[window.weatherView].icon : ""
                 font.family: "Iosevka Nerd Font"
                 font.pixelSize: window.s(800)
@@ -535,7 +538,7 @@ Item {
             Item {
                 id: centralHub
                 anchors.centerIn: parent
-                anchors.verticalCenterOffset: window.s(-100)
+                anchors.verticalCenterOffset: window.centerOffset
                 width: window.s(1); height: window.s(1) 
                 z: 5
 
