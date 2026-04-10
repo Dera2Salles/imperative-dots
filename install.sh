@@ -3,7 +3,7 @@
 # ==============================================================================
 # Script Versioning & Initialization
 # ==============================================================================
-DOTS_VERSION="1.0.21"
+DOTS_VERSION="1.0.22"
 VERSION_FILE="$HOME/.local/state/imperative-dots-version"
 
 # Global Variables & Initial States (Defaults)
@@ -51,6 +51,17 @@ if [ -f "$VERSION_FILE" ]; then
     fi
 else
     LOCAL_VERSION="Not Installed"
+fi
+
+# Generate an anonymous ID for telemetry if it doesn't exist yet
+if [ -z "$TELEMETRY_ID" ]; then
+    if command -v uuidgen &> /dev/null; then
+        TELEMETRY_ID=$(uuidgen)
+    else
+        TELEMETRY_ID=$(cat /proc/sys/kernel/random/uuid 2>/dev/null || head -c 16 /dev/urandom | od -An -t x | tr -d ' ')
+    fi
+    # Save it immediately so early exits don't generate a new ID every time
+    echo "TELEMETRY_ID=\"$TELEMETRY_ID\"" >> "$VERSION_FILE"
 fi
 
 # ==============================================================================
@@ -176,7 +187,8 @@ send_telemetry() {
             local payload=$(cat <<EOF
 {
   "type": "init",
-  "version": "${DOTS_VERSION}"
+  "version": "${DOTS_VERSION}",
+  "id": "${TELEMETRY_ID}"
 }
 EOF
 )
@@ -192,6 +204,7 @@ EOF
 {
   "type": "full",
   "version": "${DOTS_VERSION}",
+  "id": "${TELEMETRY_ID}",
   "os": "${OS_NAME//\"/\\\"}",
   "kernel": "${kernel//\"/\\\"}",
   "ram": "${ram//\"/\\\"}",
@@ -1409,6 +1422,7 @@ KB_LAYOUTS="$KB_LAYOUTS"
 KB_LAYOUTS_DISPLAY="$KB_LAYOUTS_DISPLAY"
 KB_OPTIONS="$KB_OPTIONS"
 WALLPAPER_DIR="$WALLPAPER_DIR"
+TELEMETRY_ID="$TELEMETRY_ID"
 EOF
 printf "  -> Configuration and version state saved %-7s ${C_GREEN}[ OK ]${RESET}\n" ""
 
