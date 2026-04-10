@@ -8,8 +8,7 @@ function getScale(mw) {
         return Math.max(0.35, Math.pow(r, 0.85));
     } else {
         // SCALING UP:
-        // Kept at 0.85 so it still looks good on 4K.
-        return Math.pow(r, 0.85);
+        return Math.pow(r, 0.5);
     }
 }
 
