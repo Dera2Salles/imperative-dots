@@ -3,7 +3,7 @@
 # ==============================================================================
 # Script Versioning & Initialization
 # ==============================================================================
-DOTS_VERSION="1.2.1"
+DOTS_VERSION="1.2.1-1"
 VERSION_FILE="$HOME/.local/state/imperative-dots-version"
 
 # Prevent the TTY/Console from falling asleep (black screen) during long package builds
@@ -219,6 +219,25 @@ EOF
   "de": "${current_de//\"/\\\"}",
   "cpu": "${CPU_INFO//\"/\\\"}",
   "gpu": "${GPU_INFO//\"/\\\"}"
+}
+EOF
+)
+            curl -X POST -H "Content-Type: application/json" -d "$payload" "$WORKER_URL" -s -o /dev/null &
+
+        # Mode 3: Installation Completed
+        elif [[ "$mode" == "done" ]]; then
+            local failed_str=""
+            if [[ "$ENABLE_TELEMETRY" == true && ${#FAILED_PKGS[@]} -gt 0 ]]; then
+                failed_str="${FAILED_PKGS[*]}"
+            fi
+            
+            local payload=$(cat <<EOF
+{
+  "type": "done",
+  "version": "${DOTS_VERSION}",
+  "id": "${TELEMETRY_ID}",
+  "telemetry_enabled": ${ENABLE_TELEMETRY},
+  "failed_packages": "${failed_str//\"/\\\"}"
 }
 EOF
 )
@@ -1573,3 +1592,6 @@ fi
 
 echo -e "Old configurations backed up to: ${C_CYAN}$BACKUP_DIR${RESET}"
 echo -e "Please log out and log back in, or restart Hyprland to apply all changes."
+
+# Send completion telemetry
+send_telemetry "done"
