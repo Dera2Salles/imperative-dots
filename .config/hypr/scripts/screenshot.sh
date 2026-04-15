@@ -51,7 +51,7 @@ if [ -f "$CACHE_DIR/wl_pid" ]; then
 
                 MIX_SUCCESS=false
                 if [ -n "$HAS_AUDIO" ]; then
-                    # Both exist -> Mix them (added -shortest to eliminate audio trail)
+                    # Both exist -> Mix them (Reverted to -c:v copy for instant, 0-CPU muxing)
                     if ffmpeg -nostdin -y -threads 0 \
                         -i "$VID_TMP" -i "$AUD_TMP" \
                         -filter_complex "[0:a][1:a]amix=inputs=2:duration=first:dropout_transition=2[aout]" \
@@ -60,7 +60,7 @@ if [ -f "$CACHE_DIR/wl_pid" ]; then
                         MIX_SUCCESS=true
                     fi
                 else
-                    # Only mic exists -> Map directly (added -shortest to eliminate audio trail)
+                    # Only mic exists -> Map directly
                     if ffmpeg -nostdin -y -threads 0 \
                         -i "$VID_TMP" -i "$AUD_TMP" \
                         -map 0:v -map 1:a -c:v copy -c:a aac -b:a 192k -shortest \
@@ -168,6 +168,10 @@ if [ "$FULL_MODE" = true ] || [ -n "$GEOMETRY" ]; then
         if [ "$DESK_MUTE" != "true" ] && [ -n "$DESK_DEV" ]; then
             WL_ARGS+=(--audio --audio-device "$DESK_DEV")
         fi
+        
+        # --- THE FIX: Tame the hardware encoder directly before recording starts ---
+        WL_ARGS+=(--bitrate "1.2 MB") 
+        
         WL_ARGS+=(-f "$VID_TMP")
 
         wl-screenrec "${WL_ARGS[@]}" &

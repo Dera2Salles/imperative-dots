@@ -141,37 +141,20 @@ fi
 if [[ "$ACTION" == "open" || "$ACTION" == "toggle" ]]; then
     CURRENT_MODE=$(cat "$NETWORK_MODE_FILE" 2>/dev/null)
 
-    # Network widget: bash must still own the mode-file logic here,
-    # so we read qs_active_widget only for this specific case.
+    # QML reads its own in-memory state to decide open vs close now.
+    # We just blindly pass the intended action to the QML watcher.
     if [[ "$TARGET" == "network" ]]; then
-        ACTIVE_WIDGET=$(cat /tmp/qs_active_widget 2>/dev/null)
-        if [[ "$ACTION" == "toggle" && "$ACTIVE_WIDGET" == "network" ]]; then
-            if [[ -n "$SUBTARGET" ]]; then
-                if [[ "$CURRENT_MODE" == "$SUBTARGET" ]]; then
-                    echo "close" > "$IPC_FILE"
-                else
-                    echo "$SUBTARGET" > "$NETWORK_MODE_FILE"
-                    echo "$TARGET" > "$IPC_FILE"
-                fi
-            else
-                echo "close" > "$IPC_FILE"
-            fi
-        else
-            handle_network_prep
-            [[ -n "$SUBTARGET" ]] && echo "$SUBTARGET" > "$NETWORK_MODE_FILE"
-            echo "$TARGET" > "$IPC_FILE"
-        fi
+        handle_network_prep
+        [[ -n "$SUBTARGET" ]] && echo "$SUBTARGET" > "$NETWORK_MODE_FILE"
+        echo "$ACTION:$TARGET:$SUBTARGET" > "$IPC_FILE"
         exit 0
     fi
 
-    # All other widgets: just write the target.
-    # QML reads its own in-memory currentActive to decide open vs close —
-    # no stale qs_active_widget reads, no race condition.
     if [[ "$TARGET" == "wallpaper" ]]; then
         handle_wallpaper_prep
-        echo "$TARGET:$WALLPAPER_THUMB" > "$IPC_FILE"
+        echo "$ACTION:$TARGET:$WALLPAPER_THUMB" > "$IPC_FILE"
     else
-        echo "$TARGET" > "$IPC_FILE"
+        echo "$ACTION:$TARGET:$SUBTARGET" > "$IPC_FILE"
     fi
     exit 0
 fi

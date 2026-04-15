@@ -41,7 +41,7 @@ PanelWindow {
     }
 
     Component.onCompleted: {
-        Quickshell.execDetached(["bash", "-c", "echo '" + currentActive + "' > /tmp/qs_active_widget"]);
+        // State is now strictly in memory; no need to write to /tmp on startup.
     }
 
     property string currentActive: "hidden" 
@@ -246,7 +246,7 @@ PanelWindow {
     }
 
     function switchWidget(newWidget, arg) {
-        Quickshell.execDetached(["bash", "-c", "echo '" + newWidget + "' > /tmp/qs_active_widget"]);
+        // REMOVED: Quickshell.execDetached file writing. State is strictly in memory now.
 
         prepTimer.stop();
         delayedClear.stop();
@@ -340,12 +340,24 @@ PanelWindow {
 
                 if (rawCmd !== "") {
                     let parts = rawCmd.split(":");
-                    let cmd   = parts[0];
-                    let arg   = parts.length > 1 ? parts[1] : "";
+                    let cmd = parts[0];
 
                     if (cmd === "close") {
                         switchWidget("hidden", "");
-                    } else if (getLayout(cmd)) {
+                    } else if (cmd === "toggle" || cmd === "open") {
+                        // QML handles the state internally now
+                        let targetWidget = parts.length > 1 ? parts[1] : "";
+                        let arg = parts.length > 2 ? parts.slice(2).join(":") : "";
+
+                        delayedClear.stop();
+                        if (cmd === "toggle" && targetWidget === masterWindow.currentActive) {
+                            switchWidget("hidden", "");
+                        } else if (getLayout(targetWidget)) {
+                            switchWidget(targetWidget, arg);
+                        }
+                    } else if (getLayout(cmd)) { 
+                        // Fallback for old formatting (e.g. "wallpaper:thumb.jpg")
+                        let arg = parts.length > 1 ? parts.slice(1).join(":") : "";
                         delayedClear.stop();
                         if (cmd === masterWindow.currentActive) {
                             switchWidget("hidden", "");
