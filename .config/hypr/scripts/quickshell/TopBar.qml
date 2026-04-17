@@ -179,6 +179,9 @@ Variants {
             property string batStatus: "Unknown"
             
             property string kbLayout: "us"
+
+            property string netRx: "0"
+            property string netTx: "0"
             
             ListModel { id: workspacesModel }
             
@@ -430,6 +433,25 @@ Variants {
                 }
             }
             Process { id: batteryWaiter; command: ["bash", "-c", "~/.config/hypr/scripts/quickshell/watchers/battery_wait.sh"]; onExited: batteryPoller.running = true }
+
+
+            Process {
+                id: speedPoller
+                command: ["bash", "-c", "~/.config/hypr/scripts/quickshell/watchers/speed_fetch.sh"]
+                stdout: StdioCollector {
+                    onStreamFinished: {
+                        let txt = this.text.trim();
+                        if (txt !== "") {
+                            try {
+                                let data = JSON.parse(txt);
+                                barWindow.netRx = data.rx;
+                                barWindow.netTx = data.tx;
+                            } catch(e) {}
+                        }
+                    }
+                }
+            }
+            Timer { interval: 2000; running: true; repeat: true; triggeredOnStart: true; onTriggered: speedPoller.running = true }
 
 
             Process {
@@ -1186,6 +1208,44 @@ Variants {
                                     }
                                 }
                                 MouseArea { id: wifiMouse; hoverEnabled: true; anchors.fill: parent; onClicked: Quickshell.execDetached(["bash", "-c", "~/.config/hypr/scripts/qs_manager.sh toggle network wifi"]) }
+                            }
+
+                            // Speed
+                            Rectangle {
+                                id: speedPill
+                                property bool isHovered: speedMouse.containsMouse
+                                radius: barWindow.s(10); height: sysLayout.pillHeight; 
+                                color: isHovered ? Qt.rgba(mocha.surface1.r, mocha.surface1.g, mocha.surface1.b, 0.6) : Qt.rgba(mocha.surface0.r, mocha.surface0.g, mocha.surface0.b, 0.4)
+                                clip: true
+                                
+                                property real targetWidth: speedLayoutRow.width + barWindow.s(24)
+                                width: targetWidth
+                                Behavior on width { NumberAnimation { duration: 500; easing.type: Easing.OutQuint } }
+                                
+                                scale: isHovered ? 1.05 : 1.0
+                                Behavior on scale { NumberAnimation { duration: 250; easing.type: Easing.OutExpo } }
+                                Behavior on color { ColorAnimation { duration: 200 } }
+
+                                property bool initAnimTrigger: false
+                                Timer { running: rightLayout.showLayout && !parent.initAnimTrigger; interval: 75; onTriggered: parent.initAnimTrigger = true }
+                                opacity: initAnimTrigger ? 1 : 0
+                                transform: Translate { y: parent.initAnimTrigger ? 0 : barWindow.s(15); Behavior on y { NumberAnimation { duration: 500; easing.type: Easing.OutBack } } }
+                                Behavior on opacity { NumberAnimation { duration: 400; easing.type: Easing.OutCubic } }
+
+                                Row { 
+                                    id: speedLayoutRow; anchors.centerIn: parent; spacing: barWindow.s(8)
+                                    Row {
+                                        spacing: barWindow.s(4)
+                                        Text { anchors.verticalCenter: parent.verticalCenter; text: "󰇚"; font.family: "Iosevka Nerd Font"; font.pixelSize: barWindow.s(14); color: mocha.teal }
+                                        Text { anchors.verticalCenter: parent.verticalCenter; text: barWindow.netRx; font.family: "JetBrains Mono"; font.pixelSize: barWindow.s(11); font.weight: Font.Black; color: mocha.text }
+                                    }
+                                    Row {
+                                        spacing: barWindow.s(4)
+                                        Text { anchors.verticalCenter: parent.verticalCenter; text: "󰇽"; font.family: "Iosevka Nerd Font"; font.pixelSize: barWindow.s(14); color: mocha.mauve }
+                                        Text { anchors.verticalCenter: parent.verticalCenter; text: barWindow.netTx; font.family: "JetBrains Mono"; font.pixelSize: barWindow.s(11); font.weight: Font.Black; color: mocha.text }
+                                    }
+                                }
+                                MouseArea { id: speedMouse; hoverEnabled: true; anchors.fill: parent }
                             }
 
                             // Bluetooth
