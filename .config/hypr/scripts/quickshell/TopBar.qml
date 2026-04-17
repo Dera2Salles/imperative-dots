@@ -182,6 +182,11 @@ Variants {
 
             property string netRx: "0"
             property string netTx: "0"
+            // cavaValues: array of 12 numbers 0–100, updated each cava frame
+            property var cavaValues: [0,0,0,0,0,0,0,0,0,0,0,0]
+
+            property int cpuPercent: 0
+            property int ramPercent: 0
             
             ListModel { id: workspacesModel }
             
@@ -327,6 +332,46 @@ Variants {
                 }
             }
 
+            // Cava -------------------------------------
+            // Daemon: writes /tmp/qs_cava with one line per frame
+            Process {
+                id: cavaDaemon
+                running: true
+                command: ["bash", "-c", "~/.config/hypr/scripts/quickshell/watchers/cava_daemon.sh"]
+            }
+
+            // Reader: parse raw numbers into cavaValues array
+            Process {
+                id: cavaReader
+                command: ["bash", "-c", "cat /tmp/qs_cava 2>/dev/null"]
+                stdout: StdioCollector {
+                    onStreamFinished: {
+                        let line = this.text.trim();
+                        if (line === "") return;
+                        // Take the last line in case there are multiple
+                        let lines = line.split("\n");
+                        let lastLine = lines[lines.length - 1].trim();
+                        if (lastLine === "") return;
+                        let parts = lastLine.split(";").filter(s => s !== "");
+                        if (parts.length < 1) return;
+                        let vals = parts.map(v => parseInt(v) || 0);
+                        barWindow.cavaValues = vals;
+                    }
+                }
+            }
+
+            // Poll the cava file at ~25fps (40ms) — matches cava's framerate
+            Timer {
+                id: cavaPoller
+                interval: 40
+                running: true
+                repeat: true
+                onTriggered: {
+                    cavaReader.running = false;
+                    cavaReader.running = true;
+                }
+            }
+
             // ==========================================
             // MODULAR SYSTEM WATCHERS
             // ==========================================
@@ -452,6 +497,25 @@ Variants {
                 }
             }
             Timer { interval: 2000; running: true; repeat: true; triggeredOnStart: true; onTriggered: speedPoller.running = true }
+
+            // --- CPU + RAM ---
+            Process {
+                id: sysmonPoller
+                command: ["bash", "-c", "~/.config/hypr/scripts/quickshell/watchers/sysmon_fetch.sh"]
+                stdout: StdioCollector {
+                    onStreamFinished: {
+                        let txt = this.text.trim();
+                        if (txt !== "") {
+                            try {
+                                let data = JSON.parse(txt);
+                                barWindow.cpuPercent = data.cpu;
+                                barWindow.ramPercent = data.ram;
+                            } catch(e) {}
+                        }
+                    }
+                }
+            }
+            Timer { interval: 2000; running: true; repeat: true; triggeredOnStart: true; onTriggered: sysmonPoller.running = true }
 
 
             Process {
@@ -937,6 +1001,7 @@ Variants {
                                 Row {
                                     anchors.verticalCenter: parent.verticalCenter
                                     spacing: barWindow.width < 1920 ? barWindow.s(4) : barWindow.s(8)
+
                                     Item { 
                                         width: barWindow.s(24); height: barWindow.s(24); 
                                         anchors.verticalCenter: parent.verticalCenter
@@ -1009,6 +1074,215 @@ Variants {
 
                     // Dynamic Spacer to gently push the tray and system pills completely to the right edge
                     Item { Layout.fillWidth: true } 
+
+                    // -------- CPU + RAM Monitor Pill --------
+                    Rectangle {
+                        id: sysmonPill
+                        Layout.preferredHeight: barWindow.barHeight
+                        Layout.preferredWidth: sysmonRow.width + barWindow.s(24)
+                        radius: barWindow.s(14)
+                        border.color: Qt.rgba(mocha.text.r, mocha.text.g, mocha.text.b, 0.08)
+                        border.width: 1
+                        color: Qt.rgba(mocha.base.r, mocha.base.g, mocha.base.b, 0.75)
+                        clip: true
+
+                        property bool isHovered: sysmonMouse.containsMouse
+                        Behavior on color { ColorAnimation { duration: 200 } }
+                        scale: isHovered ? 1.03 : 1.0
+                        Behavior on scale { NumberAnimation { duration: 250; easing.type: Easing.OutExpo } }
+
+                        property bool initAnimTrigger: false
+                        Timer { running: rightLayout.showLayout && !parent.initAnimTrigger; interval: 60; onTriggered: parent.initAnimTrigger = true }
+                        opacity: initAnimTrigger ? 1 : 0
+                        transform: Translate { y: sysmonPill.initAnimTrigger ? 0 : barWindow.s(15); Behavior on y { NumberAnimation { duration: 500; easing.type: Easing.OutBack } } }
+                        Behavior on opacity { NumberAnimation { duration: 400; easing.type: Easing.OutCubic } }
+
+                        MouseArea {
+                            id: sysmonMouse
+                            anchors.fill: parent
+                            hoverEnabled: true
+                        }
+
+                        Row {
+                            id: sysmonRow
+                            anchors.centerIn: parent
+                            spacing: barWindow.s(10)
+
+                            // --- CPU gauge ---
+                            Column {
+                                spacing: barWindow.s(2)
+                                anchors.verticalCenter: parent.verticalCenter
+
+                                Text {
+                                    text: "CPU"
+                                    font.family: "JetBrains Mono"
+                                    font.pixelSize: barWindow.s(9)
+                                    font.weight: Font.Bold
+                                    color: mocha.overlay1
+                                    anchors.horizontalCenter: parent.horizontalCenter
+                                }
+
+                                // Bar track
+                                Rectangle {
+                                    width: barWindow.s(44)
+                                    height: barWindow.s(5)
+                                    radius: barWindow.s(3)
+                                    color: Qt.rgba(mocha.surface1.r, mocha.surface1.g, mocha.surface1.b, 0.8)
+
+                                    Rectangle {
+                                        width: parent.width * (barWindow.cpuPercent / 100)
+                                        height: parent.height
+                                        radius: parent.radius
+                                        color: {
+                                            let p = barWindow.cpuPercent;
+                                            if (p >= 85) return mocha.red;
+                                            if (p >= 60) return mocha.peach;
+                                            return mocha.sky;
+                                        }
+                                        Behavior on width { NumberAnimation { duration: 400; easing.type: Easing.OutCubic } }
+                                        Behavior on color { ColorAnimation { duration: 400 } }
+                                    }
+                                }
+
+                                Text {
+                                    text: barWindow.cpuPercent + "%"
+                                    font.family: "JetBrains Mono"
+                                    font.pixelSize: barWindow.s(10)
+                                    font.weight: Font.Black
+                                    color: {
+                                        let p = barWindow.cpuPercent;
+                                        if (p >= 85) return mocha.red;
+                                        if (p >= 60) return mocha.peach;
+                                        return mocha.text;
+                                    }
+                                    Behavior on color { ColorAnimation { duration: 400 } }
+                                    anchors.horizontalCenter: parent.horizontalCenter
+                                }
+                            }
+
+                            // Divider
+                            Rectangle {
+                                width: 1
+                                height: barWindow.s(28)
+                                anchors.verticalCenter: parent.verticalCenter
+                                color: Qt.rgba(mocha.text.r, mocha.text.g, mocha.text.b, 0.1)
+                            }
+
+                            // --- RAM gauge ---
+                            Column {
+                                spacing: barWindow.s(2)
+                                anchors.verticalCenter: parent.verticalCenter
+
+                                Text {
+                                    text: "RAM"
+                                    font.family: "JetBrains Mono"
+                                    font.pixelSize: barWindow.s(9)
+                                    font.weight: Font.Bold
+                                    color: mocha.overlay1
+                                    anchors.horizontalCenter: parent.horizontalCenter
+                                }
+
+                                Rectangle {
+                                    width: barWindow.s(44)
+                                    height: barWindow.s(5)
+                                    radius: barWindow.s(3)
+                                    color: Qt.rgba(mocha.surface1.r, mocha.surface1.g, mocha.surface1.b, 0.8)
+
+                                    Rectangle {
+                                        width: parent.width * (barWindow.ramPercent / 100)
+                                        height: parent.height
+                                        radius: parent.radius
+                                        color: {
+                                            let p = barWindow.ramPercent;
+                                            if (p >= 85) return mocha.red;
+                                            if (p >= 60) return mocha.peach;
+                                            return mocha.mauve;
+                                        }
+                                        Behavior on width { NumberAnimation { duration: 600; easing.type: Easing.OutCubic } }
+                                        Behavior on color { ColorAnimation { duration: 400 } }
+                                    }
+                                }
+
+                                Text {
+                                    text: barWindow.ramPercent + "%"
+                                    font.family: "JetBrains Mono"
+                                    font.pixelSize: barWindow.s(10)
+                                    font.weight: Font.Black
+                                    color: {
+                                        let p = barWindow.ramPercent;
+                                        if (p >= 85) return mocha.red;
+                                        if (p >= 60) return mocha.peach;
+                                        return mocha.text;
+                                    }
+                                    Behavior on color { ColorAnimation { duration: 400 } }
+                                    anchors.horizontalCenter: parent.horizontalCenter
+                                }
+                            }
+                        }
+                    }
+
+                    // -------- Mini Cava Visualizer Pill --------
+                    Rectangle {
+                        id: cavaPill
+                        Layout.preferredHeight: barWindow.barHeight
+                        radius: barWindow.s(14)
+                        border.color: Qt.rgba(mocha.text.r, mocha.text.g, mocha.text.b, 0.08)
+                        border.width: 1
+                        color: Qt.rgba(mocha.base.r, mocha.base.g, mocha.base.b, 0.75)
+                        clip: true
+
+                        property int barCount: barWindow.cavaValues.length > 0 ? barWindow.cavaValues.length : 12
+                        property int barW: barWindow.s(3)
+                        property int barGap: barWindow.s(2)
+                        property int innerH: barWindow.s(28)
+
+                        Layout.preferredWidth: barCount * (barW + barGap) - barGap + barWindow.s(24)
+
+                        property bool initAnimTrigger: false
+                        Timer { running: rightLayout.showLayout && !parent.initAnimTrigger; interval: 0; onTriggered: parent.initAnimTrigger = true }
+                        opacity: initAnimTrigger ? 1 : 0
+                        transform: Translate { y: cavaPill.initAnimTrigger ? 0 : barWindow.s(15); Behavior on y { NumberAnimation { duration: 500; easing.type: Easing.OutBack } } }
+                        Behavior on opacity { NumberAnimation { duration: 400; easing.type: Easing.OutCubic } }
+
+                        Row {
+                            anchors.centerIn: parent
+                            spacing: cavaPill.barGap
+
+                            Repeater {
+                                model: cavaPill.barCount
+                                delegate: Item {
+                                    width: cavaPill.barW
+                                    height: cavaPill.innerH
+
+                                    property real rawVal: {
+                                        let vals = barWindow.cavaValues;
+                                        return (index < vals.length) ? vals[index] : 0;
+                                    }
+                                    property real barHeight: Math.max(barWindow.s(2), (rawVal / 100) * cavaPill.innerH)
+
+                                    Behavior on barHeight { NumberAnimation { duration: 80; easing.type: Easing.OutCubic } }
+
+                                    Rectangle {
+                                        width: parent.width
+                                        height: parent.barHeight
+                                        anchors.bottom: parent.bottom
+                                        radius: barWindow.s(2)
+
+                                        // Color shifts from teal (quiet) → mauve (loud) based on value
+                                        color: {
+                                            let t = parent.rawVal / 100;
+                                            return Qt.rgba(
+                                                mocha.mauve.r * t + mocha.teal.r * (1 - t),
+                                                mocha.mauve.g * t + mocha.teal.g * (1 - t),
+                                                mocha.mauve.b * t + mocha.teal.b * (1 - t),
+                                                1.0
+                                            );
+                                        }
+                                    }
+                                }
+                            }
+                        }
+                    }
 
                     // Dedicated System Tray Pill
                     Rectangle {
@@ -1234,15 +1508,25 @@ Variants {
 
                                 Row { 
                                     id: speedLayoutRow; anchors.centerIn: parent; spacing: barWindow.s(8)
-                                    Row {
-                                        spacing: barWindow.s(4)
-                                        Text { anchors.verticalCenter: parent.verticalCenter; text: "󰇚"; font.family: "Iosevka Nerd Font"; font.pixelSize: barWindow.s(14); color: mocha.teal }
-                                        Text { anchors.verticalCenter: parent.verticalCenter; text: barWindow.netRx; font.family: "JetBrains Mono"; font.pixelSize: barWindow.s(11); font.weight: Font.Black; color: mocha.text }
+                                    Text {
+                                        anchors.verticalCenter: parent.verticalCenter
+                                        text: "󰖩" // Network icon
+                                        font.family: "Iosevka Nerd Font"; font.pixelSize: barWindow.s(18)
+                                        color: mocha.blue
                                     }
-                                    Row {
-                                        spacing: barWindow.s(4)
-                                        Text { anchors.verticalCenter: parent.verticalCenter; text: "󰇽"; font.family: "Iosevka Nerd Font"; font.pixelSize: barWindow.s(14); color: mocha.mauve }
-                                        Text { anchors.verticalCenter: parent.verticalCenter; text: barWindow.netTx; font.family: "JetBrains Mono"; font.pixelSize: barWindow.s(11); font.weight: Font.Black; color: mocha.text }
+                                    Column {
+                                        anchors.verticalCenter: parent.verticalCenter
+                                        spacing: 0
+                                        Row {
+                                            spacing: barWindow.s(3)
+                                            Text { text: "▼"; font.pixelSize: barWindow.s(8); anchors.verticalCenter: parent.verticalCenter; color: mocha.teal; font.family: "Iosevka Nerd Font" }
+                                            Text { text: barWindow.netRx; font.family: "JetBrains Mono"; anchors.verticalCenter: parent.verticalCenter; font.pixelSize: barWindow.s(10); font.weight: Font.ExtraBold; color: mocha.text }
+                                        }
+                                        Row {
+                                            spacing: barWindow.s(3)
+                                            Text { text: "▲"; font.pixelSize: barWindow.s(8); anchors.verticalCenter: parent.verticalCenter; color: mocha.mauve; font.family: "Iosevka Nerd Font" }
+                                            Text { text: barWindow.netTx; font.family: "JetBrains Mono"; anchors.verticalCenter: parent.verticalCenter; font.pixelSize: barWindow.s(10); font.weight: Font.ExtraBold; color: mocha.text }
+                                        }
                                     }
                                 }
                                 MouseArea { id: speedMouse; hoverEnabled: true; anchors.fill: parent }
