@@ -5,6 +5,10 @@
 ```bash
 bash -c "$(curl -fsSL https://raw.githubusercontent.com/ilyamiro/imperative-dots/master/install.sh)"
 ```
+### To install fedora based:
+```bash
+bash -c "$(curl -fsSL https://raw.githubusercontent.com/ilyamiro/imperative-dots/master/install-fedora.sh
+```
 
 ### Reach out to me:
 #### twitter/x: @ilyamirox
