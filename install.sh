@@ -1213,10 +1213,22 @@ if [ "$DO_FULL_INSTALL" = true ]; then
 
         if [ -d "$SOURCE_PATH" ]; then
             if [ -e "$TARGET_PATH" ] || [ -L "$TARGET_PATH" ]; then
-                mv "$TARGET_PATH" "$BACKUP_DIR/$folder"
+                echo -e "\n${C_YELLOW}[ conflict ]${RESET} Configuration for ${C_CYAN}$folder${RESET} already exists."
+                choice=$(echo -e "1. Overwrite with new version (Backs up current)\n2. Keep my current configuration" | fzf --ansi --layout=reverse --border=rounded --height=8 --prompt=" Action for $folder > " --header=" Select action for $folder ")
+                
+                if [[ "$choice" == *"1"* ]]; then
+                    mv "$TARGET_PATH" "$BACKUP_DIR/$folder"
+                    cp -r "$SOURCE_PATH" "$TARGET_PATH"
+                    printf "  -> Overwrote %-29s ${C_GREEN}[ OK ]${RESET}\n" "$folder"
+                else
+                    # Optional: Backup current to config-backup folder even if skipped
+                    cp -r "$TARGET_PATH" "$BACKUP_DIR/${folder}_skipped" 2>/dev/null || true
+                    printf "  -> Kept current %-31s ${C_YELLOW}[ SKIP ]${RESET}\n" "$folder"
+                fi
+            else
+                cp -r "$SOURCE_PATH" "$TARGET_PATH"
+                printf "  -> Copied %-31s ${C_GREEN}[ OK ]${RESET}\n" "$folder"
             fi
-            cp -r "$SOURCE_PATH" "$TARGET_PATH"
-            printf "  -> Copied %-31s ${C_GREEN}[ OK ]${RESET}\n" "$folder"
         fi
     done
     
@@ -1234,36 +1246,48 @@ else
     fi
 
     if [ -n "$CHANGED_FILES" ]; then
-        echo -e "  -> Performing ${C_GREEN}Partial Update${RESET} based on upstream changes..."
-        echo "$CHANGED_FILES" | while IFS= read -r file; do
-            FOLDER_NAME=$(echo "$file" | cut -d'/' -f2)
+        echo -e "  -> Detected upstream changes in ${C_CYAN}$(echo "$CHANGED_FILES" | wc -l)${RESET} files."
+        echo -e "Would you like to apply these updates? (Local files will be backed up)"
+        
+        apply_updates=$(echo -e "1. Yes, apply all updates (Recommended)\n2. No, skip all updates" | fzf --ansi --layout=reverse --border=rounded --height=8 --prompt=" Action > ")
+        
+        if [[ "$apply_updates" == *"2"* ]]; then
+            echo -e "  -> ${C_YELLOW}Skipping all upstream updates.${RESET}"
+            CHANGED_FILES=""
+        fi
 
-            # Check if this changed file belongs to the folders we actually manage
-            valid_folder=false
-            for f in "${CONFIG_FOLDERS[@]}"; do
-                if [ "$f" == "$FOLDER_NAME" ]; then
-                    valid_folder=true
-                    break
+        if [ -n "$CHANGED_FILES" ]; then
+            echo -e "  -> Performing ${C_GREEN}Partial Update${RESET}..."
+            echo "$CHANGED_FILES" | while IFS= read -r file; do
+                FOLDER_NAME=$(echo "$file" | cut -d'/' -f2)
+
+                # Check if this changed file belongs to the folders we actually manage
+                valid_folder=false
+                for f in "${CONFIG_FOLDERS[@]}"; do
+                    if [ "$f" == "$FOLDER_NAME" ]; then
+                        valid_folder=true
+                        break
+                    fi
+                done
+
+                if [ "$valid_folder" = true ]; then
+                    SOURCE_FILE="$REPO_DIR/$file"
+                    TARGET_FILE="$HOME/$file"
+                    REL_PATH="${file#\.config/}"
+
+                    if [ -f "$TARGET_FILE" ]; then
+                        # Backup specifically modified files retaining the folder structure
+                        mkdir -p "$(dirname "$BACKUP_DIR/$REL_PATH")"
+                        cp "$TARGET_FILE" "$BACKUP_DIR/$REL_PATH"
+                    fi
+
+                    mkdir -p "$(dirname "$TARGET_FILE")"
+                    cp "$SOURCE_FILE" "$TARGET_FILE"
+                    echo "    -> Updated: $file"
                 fi
             done
-
-            if [ "$valid_folder" = true ]; then
-                SOURCE_FILE="$REPO_DIR/$file"
-                TARGET_FILE="$HOME/$file"
-                REL_PATH="${file#\.config/}"
-
-                if [ -f "$TARGET_FILE" ]; then
-                    # Backup specifically modified files retaining the folder structure
-                    mkdir -p "$(dirname "$BACKUP_DIR/$REL_PATH")"
-                    cp "$TARGET_FILE" "$BACKUP_DIR/$REL_PATH"
-                fi
-
-                mkdir -p "$(dirname "$TARGET_FILE")"
-                cp "$SOURCE_FILE" "$TARGET_FILE"
-                echo "    -> Updated: $file"
-            fi
-        done
-        printf "  -> Partial update complete %-21s ${C_GREEN}[ OK ]${RESET}\n" ""
+            printf "  -> Partial update complete %-21s ${C_GREEN}[ OK ]${RESET}\n" ""
+        fi
     else
         echo "  -> No target config files were changed upstream. Local files kept intact."
     fi

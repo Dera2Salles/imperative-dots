@@ -768,7 +768,25 @@ SETTINGS_FILE="$TARGET_CONFIG_DIR/hypr/scripts/settings.json"
 
 echo "  -> Applying Configurations..."
 for folder in "${CONFIG_FOLDERS[@]}"; do
-    if [ -d "$REPO_DIR/.config/$folder" ]; then [ -e "$TARGET_CONFIG_DIR/$folder" ] && mv "$TARGET_CONFIG_DIR/$folder" "$BACKUP_DIR/$folder"; cp -r "$REPO_DIR/.config/$folder" "$TARGET_CONFIG_DIR/$folder"; fi
+    if [ -d "$REPO_DIR/.config/$folder" ]; then
+        if [ -e "$TARGET_CONFIG_DIR/$folder" ] || [ -L "$TARGET_CONFIG_DIR/$folder" ]; then
+            echo -e "\n${C_YELLOW}[ conflict ]${RESET} Configuration for ${C_CYAN}$folder${RESET} already exists."
+            choice=$(echo -e "1. Overwrite with new version (Backs up current)\n2. Keep my current configuration" | fzf --ansi --layout=reverse --border=rounded --height=8 --prompt=" Action for $folder > " --header=" Select action for $folder ")
+            
+            if [[ "$choice" == *"1"* ]]; then
+                mv "$TARGET_CONFIG_DIR/$folder" "$BACKUP_DIR/$folder"
+                cp -r "$REPO_DIR/.config/$folder" "$TARGET_CONFIG_DIR/$folder"
+                printf "  -> Overwrote %-29s ${C_GREEN}[ OK ]${RESET}\n" "$folder"
+            else
+                # Copy current to backup anyway for safety
+                cp -r "$TARGET_CONFIG_DIR/$folder" "$BACKUP_DIR/${folder}_skipped" 2>/dev/null || true
+                printf "  -> Kept current %-31s ${C_YELLOW}[ SKIP ]${RESET}\n" "$folder"
+            fi
+        else
+            cp -r "$REPO_DIR/.config/$folder" "$TARGET_CONFIG_DIR/$folder"
+            printf "  -> Copied %-31s ${C_GREEN}[ OK ]${RESET}\n" "$folder"
+        fi
+    fi
 done
 
 # Restoring Weather Config
