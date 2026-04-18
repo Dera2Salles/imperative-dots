@@ -44,7 +44,13 @@ PanelWindow {
         // State is now strictly in memory; no need to write to /tmp on startup.
     }
 
-    property string currentActive: "hidden" 
+    property string currentActive: "hidden"
+
+    onCurrentActiveChanged: {
+        // Broadcast active state so TopBar knows when to morph
+        Quickshell.execDetached(["bash", "-c", "echo '" + currentActive + "' > /tmp/qs_current_widget"]);
+    }
+
     property bool isVisible: false
     property string activeArg: ""
     property bool disableMorph: false 
@@ -330,8 +336,9 @@ PanelWindow {
     Process {
         id: ipcWatcher
         command: ["bash", "-c",
-            "inotifywait -qq -e close_write,moved_to --include 'qs_widget_state$' /tmp/ 2>/dev/null; " +
-            "if [ -f /tmp/qs_widget_state ]; then cat /tmp/qs_widget_state && rm -f /tmp/qs_widget_state; fi"
+            "touch /tmp/qs_widget_state; " +
+            "inotifywait -qq -e close_write /tmp/qs_widget_state 2>/dev/null; " +
+            "cat /tmp/qs_widget_state"
         ]
         running: true
         stdout: StdioCollector {
@@ -345,22 +352,39 @@ PanelWindow {
                     if (cmd === "close") {
                         switchWidget("hidden", "");
                     } else if (cmd === "toggle" || cmd === "open") {
-                        // QML handles the state internally now
                         let targetWidget = parts.length > 1 ? parts[1] : "";
                         let arg = parts.length > 2 ? parts.slice(2).join(":") : "";
 
                         delayedClear.stop();
-                        if (cmd === "toggle" && targetWidget === masterWindow.currentActive) {
-                            switchWidget("hidden", "");
+                        
+                        if (targetWidget === masterWindow.currentActive) {
+                            let currentItem = widgetStack.currentItem;
+                            
+                            // 1. If it's a tabbed widget and user requests a DIFFERENT tab, switch natively
+                            if (arg !== "" && currentItem && currentItem.activeMode !== undefined && currentItem.activeMode !== arg) {
+                                currentItem.activeMode = arg;
+                            } 
+                            // 2. If it's a toggle command and the tab matches (or no subtarget given), close it
+                            else if (cmd === "toggle") {
+                                switchWidget("hidden", "");
+                            }
+                            // 3. If "open" and already on the correct tab, do nothing (stays open).
+                            
                         } else if (getLayout(targetWidget)) {
                             switchWidget(targetWidget, arg);
                         }
                     } else if (getLayout(cmd)) { 
-                        // Fallback for old formatting (e.g. "wallpaper:thumb.jpg")
+                        // Fallback for old formatting
                         let arg = parts.length > 1 ? parts.slice(1).join(":") : "";
                         delayedClear.stop();
+                        
                         if (cmd === masterWindow.currentActive) {
-                            switchWidget("hidden", "");
+                            let currentItem = widgetStack.currentItem;
+                            if (arg !== "" && currentItem && currentItem.activeMode !== undefined && currentItem.activeMode !== arg) {
+                                currentItem.activeMode = arg;
+                            } else {
+                                switchWidget("hidden", "");
+                            }
                         } else {
                             switchWidget(cmd, arg);
                         }
@@ -371,8 +395,7 @@ PanelWindow {
                 ipcWatcher.running = true;
             }
         }
-    }
-
+    }    
     Timer {
         id: delayedClear
         interval: masterWindow.morphDuration 

@@ -30,8 +30,13 @@ fi
 (timeout 2 bluetoothctl scan off > /dev/null 2>&1) &
 # ---------------------------------------------
 
-# Configuration: How many workspaces do you want to show?
-SEQ_END=8
+# Configuration: Parse from settings.json dynamically, fallback to 8
+SETTINGS_FILE="$HOME/.config/hypr/settings.json"
+SEQ_END=$(jq -r '.workspaceCount // 8' "$SETTINGS_FILE" 2>/dev/null)
+# Double check it is a valid integer to prevent jq errors later
+if ! [[ "$SEQ_END" =~ ^[0-9]+$ ]]; then
+    SEQ_END=8
+fi
 
 print_workspaces() {
     # Get raw data with a timeout fallback

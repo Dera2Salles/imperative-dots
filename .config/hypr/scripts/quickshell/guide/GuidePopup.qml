@@ -422,17 +422,22 @@ Item {
             { k1: "SUPER", k2: "L", action: "Lock Screen", cmd: "bash ~/.config/hypr/scripts/lock.sh" },
             { k1: "PRINT", k2: "", action: "Screenshot", cmd: "bash ~/.config/hypr/scripts/screenshot.sh" },
             { k1: "SHIFT", k2: "PRINT", action: "Screenshot (Edit)", cmd: "bash ~/.config/hypr/scripts/screenshot.sh --edit" },
+            { k1: "SUPER", k2: "PRINT", action: "Screenshot (Full)", cmd: "bash ~/.config/hypr/scripts/screenshot.sh --full" },
+            { k1: "SUPER+SHIFT", k2: "PRINT", action: "Screenshot (Full Edit)", cmd: "bash ~/.config/hypr/scripts/screenshot.sh --full --edit" },
             { k1: "ALT+SHIFT", k2: "", action: "Switch Keyboard Layout", cmd: "hyprctl switchxkblayout main next" },
-            { k1: "SUPER", k2: "W", action: "Toggle Wallpaper Picker", cmd: "bash ~/.config/hypr/scripts/qs_manager.sh toggle wallpaper" },
-            { k1: "SUPER", k2: "Q", action: "Toggle Music Widget", cmd: "bash ~/.config/hypr/scripts/qs_manager.sh toggle music" },
-            { k1: "SUPER", k2: "B", action: "Toggle Battery Widget", cmd: "bash ~/.config/hypr/scripts/qs_manager.sh toggle battery" },
-            { k1: "SUPER", k2: "S", action: "Toggle Calendar Widget", cmd: "bash ~/.config/hypr/scripts/qs_manager.sh toggle calendar" },
-            { k1: "SUPER", k2: "N", action: "Toggle Network Widget", cmd: "bash ~/.config/hypr/scripts/qs_manager.sh toggle network" },
-            { k1: "SUPER", k2: "V", action: "Toggle Volume Widget", cmd: "bash ~/.config/hypr/scripts/qs_manager.sh toggle volume" },
-            { k1: "SUPER", k2: "M", action: "Toggle Monitors Widget", cmd: "bash ~/.config/hypr/scripts/qs_manager.sh toggle monitors" },
+            { k1: "SUPER", k2: "W", action: "Toggle Wallpaper", cmd: "bash ~/.config/hypr/scripts/qs_manager.sh toggle wallpaper" },
+            { k1: "SUPER", k2: "Q", action: "Toggle Music", cmd: "bash ~/.config/hypr/scripts/qs_manager.sh toggle music" },
+            { k1: "SUPER", k2: "B", action: "Toggle Battery", cmd: "bash ~/.config/hypr/scripts/qs_manager.sh toggle battery" },
+            { k1: "SUPER", k2: "S", action: "Toggle Calendar", cmd: "bash ~/.config/hypr/scripts/qs_manager.sh toggle calendar" },
+            { k1: "SUPER", k2: "N", action: "Toggle Network", cmd: "bash ~/.config/hypr/scripts/qs_manager.sh toggle network" },
+            { k1: "SUPER", k2: "V", action: "Toggle Volume", cmd: "bash ~/.config/hypr/scripts/qs_manager.sh toggle volume" },
+            { k1: "SUPER", k2: "M", action: "Toggle Monitors", cmd: "bash ~/.config/hypr/scripts/qs_manager.sh toggle monitors" },
+            { k1: "SUPER", k2: "H", action: "Toggle Guide", cmd: "bash ~/.config/hypr/scripts/qs_manager.sh toggle guide" },
+            { k1: "SUPER+SHIFT", k2: "S", action: "Toggle Settings", cmd: "bash ~/.config/hypr/scripts/qs_manager.sh toggle settings" },
+            { k1: "SUPER", k2: "R", action: "Reload System", cmd: "bash ~/.config/hypr/scripts/reload.sh" },
             { k1: "SUPER+SHIFT", k2: "T", action: "Toggle FocusTime", cmd: "bash ~/.config/hypr/scripts/qs_manager.sh toggle focustime" },
-            { k1: "SUPER+SHIFT", k2: "S", action: "Toggle Stewart AI", cmd: "bash ~/.config/hypr/scripts/qs_manager.sh toggle stewart" },
             { k1: "SUPER", k2: "A", action: "Toggle SwayNC Panel", cmd: "swaync-client -t -sw" },
+            { k1: "SUPER", k2: "TAB", action: "Focus Next Monitor", cmd: "bash ~/.config/hypr/scripts/focus_next_monitor.sh" },
             { k1: "SUPER", k2: "SPACE", action: "Play/Pause Media", cmd: "playerctl play-pause" },
             { k1: "Media", k2: "Play/Pause", action: "Play/Pause Media", cmd: "playerctl play-pause" },
             { k1: "Media", k2: "Vol Up/Down", action: "Adjust Volume", cmd: "swayosd-client --output-volume raise" },
@@ -1416,6 +1421,7 @@ Item {
                                 }
                             }
                         }
+
                         // --- Consolidated Storage Block ---
                         Rectangle {
                             Layout.fillWidth: true
