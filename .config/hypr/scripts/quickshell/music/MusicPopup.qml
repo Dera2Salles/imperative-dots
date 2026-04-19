@@ -592,6 +592,8 @@ Item {
                                     source: artImg
                                     maskEnabled: true
                                     maskSource: maskRect
+                                    maskThresholdMin: 0.5
+                                    maskSpreadAtMin: 1.0
                                     opacity: artImg.status === Image.Ready ? 1.0 : 0.0
                                     Behavior on opacity { NumberAnimation { duration: 800 } }
                                 }

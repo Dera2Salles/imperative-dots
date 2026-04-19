@@ -2,6 +2,7 @@
 import QtQuick
 import QtQuick.Layouts
 import QtQuick.Controls
+import QtQuick.Effects
 import Quickshell
 import Quickshell.Io
 import Quickshell.Wayland
@@ -984,20 +985,53 @@ Variants {
                                     scale: mediaInfoMouse.containsMouse ? 1.02 : 1.0
                                     Behavior on scale { NumberAnimation { duration: 250; easing.type: Easing.OutExpo } }
 
-                                    Rectangle {
-                                        width: barWindow.s(32); height: barWindow.s(32); radius: barWindow.s(8); color: mocha.surface1
-                                        border.width: barWindow.musicData.status === "Playing" ? 1 : 0
-                                        border.color: mocha.mauve
-                                        clip: true
+                                    Item {
+                                        width: barWindow.s(32); height: barWindow.s(32)
+                                        
+                                        Rectangle {
+                                            anchors.fill: parent
+                                            radius: barWindow.s(8)
+                                            color: mocha.surface1
+                                        }
+
+                                        Rectangle {
+                                            id: mediaArtMask
+                                            anchors.fill: parent
+                                            radius: barWindow.s(8)
+                                            color: "black"
+                                            visible: false
+                                            layer.enabled: true
+                                        }
+
                                         Image { 
+                                            id: mediaArtImg
                                             anchors.fill: parent; 
                                             source: barWindow.musicData.artUrl || ""; 
                                             fillMode: Image.PreserveAspectCrop 
+                                            visible: false
+                                        }
+
+                                        MultiEffect {
+                                            anchors.fill: parent
+                                            source: mediaArtImg
+                                            maskEnabled: true
+                                            maskSource: mediaArtMask
+                                            maskThresholdMin: 0.5
+                                            maskSpreadAtMin: 1.0
                                         }
                                         
                                         Rectangle {
                                             anchors.fill: parent
+                                            radius: barWindow.s(8)
                                             color: Qt.rgba(mocha.mauve.r, mocha.mauve.g, mocha.mauve.b, 0.2)
+                                        }
+
+                                        Rectangle {
+                                            anchors.fill: parent
+                                            radius: barWindow.s(8)
+                                            color: "transparent"
+                                            border.width: barWindow.musicData.status === "Playing" ? 1 : 0
+                                            border.color: mocha.mauve
                                         }
                                     }
                                     Column {
