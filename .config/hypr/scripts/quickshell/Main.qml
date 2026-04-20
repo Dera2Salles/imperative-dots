@@ -12,6 +12,14 @@ import "notifications" as Notifs
 PanelWindow {
     id: masterWindow
     color: "transparent"
+    
+    IpcHandler {
+        target: "main"
+    
+        function forceReload() {
+            Quickshell.reload(true) 
+        }
+    }
 
     WlrLayershell.namespace: "qs-master"
     WlrLayershell.layer: WlrLayer.Overlay
@@ -19,8 +27,8 @@ PanelWindow {
     exclusionMode: ExclusionMode.Ignore 
     focusable: true
 
-    width: Screen.width
-    height: Screen.height
+    implicitWidth: Screen.width
+    implicitHeight: Screen.height
 
     visible: isVisible
 
@@ -116,7 +124,7 @@ PanelWindow {
             let popupData = Object.assign({ "uid": masterWindow._popupCounter }, notifData);
             activePopupsModel.append(popupData);
         }
-    }    
+    }   
     property var notifModel: globalNotificationHistory
     
     // --- INSTANTIATE THE POPUP OVERLAY ---
@@ -191,7 +199,7 @@ PanelWindow {
     }
 
     onIsVisibleChanged: {
-        if (isVisible) masterWindow.requestActivate();
+        if (isVisible) widgetStack.forceActiveFocus();
     }
 
     Item {
@@ -202,7 +210,6 @@ PanelWindow {
         clip: true 
         layer.enabled: true 
 
-        // Smoother easing type: OutExpo makes animations feel snappy yet perfectly fluid
         Behavior on x { enabled: !masterWindow.disableMorph; NumberAnimation { duration: masterWindow.morphDuration; easing.type: Easing.OutExpo } }
         Behavior on y { enabled: !masterWindow.disableMorph; NumberAnimation { duration: masterWindow.morphDuration; easing.type: Easing.OutExpo } }
         Behavior on width { enabled: !masterWindow.disableMorph; NumberAnimation { duration: masterWindow.morphDuration; easing.type: Easing.OutExpo } }
@@ -242,7 +249,6 @@ PanelWindow {
                 }
                 replaceExit: Transition {
                     ParallelAnimation {
-                        // Uses the dynamically set exitDuration
                         NumberAnimation { property: "opacity"; from: 1.0; to: 0.0; duration: masterWindow.exitDuration; easing.type: Easing.InExpo }
                         NumberAnimation { property: "scale"; from: 1.0; to: 1.02; duration: masterWindow.exitDuration; easing.type: Easing.InExpo }
                     }
@@ -252,8 +258,6 @@ PanelWindow {
     }
 
     function switchWidget(newWidget, arg) {
-        // REMOVED: Quickshell.execDetached file writing. State is strictly in memory now.
-
         prepTimer.stop();
         delayedClear.stop();
 
@@ -286,11 +290,9 @@ PanelWindow {
                 prepTimer.start();
                 
             } else {
-                // Morphing directly between widgets (including wallpaper)
                 masterWindow.morphDuration = 500;
                 masterWindow.disableMorph = false;
                 
-                // If transitioning to wallpaper, make the previous widget disappear significantly faster
                 masterWindow.exitDuration = (newWidget === "wallpaper") ? 100 : 300;
                 
                 executeSwitch(newWidget, arg, false);
@@ -319,6 +321,8 @@ PanelWindow {
         masterWindow.targetH = t.h;
         
         let props = newWidget === "wallpaper" ? { "widgetArg": arg } : {};
+        
+        // RESTORED: Passing notifModel explicitly to components
         props["notifModel"] = masterWindow.notifModel;
 
         if (immediate) {
@@ -360,21 +364,17 @@ PanelWindow {
                         if (targetWidget === masterWindow.currentActive) {
                             let currentItem = widgetStack.currentItem;
                             
-                            // 1. If it's a tabbed widget and user requests a DIFFERENT tab, switch natively
                             if (arg !== "" && currentItem && currentItem.activeMode !== undefined && currentItem.activeMode !== arg) {
                                 currentItem.activeMode = arg;
                             } 
-                            // 2. If it's a toggle command and the tab matches (or no subtarget given), close it
                             else if (cmd === "toggle") {
                                 switchWidget("hidden", "");
                             }
-                            // 3. If "open" and already on the correct tab, do nothing (stays open).
                             
                         } else if (getLayout(targetWidget)) {
                             switchWidget(targetWidget, arg);
                         }
                     } else if (getLayout(cmd)) { 
-                        // Fallback for old formatting
                         let arg = parts.length > 1 ? parts.slice(1).join(":") : "";
                         delayedClear.stop();
                         
@@ -395,7 +395,7 @@ PanelWindow {
                 ipcWatcher.running = true;
             }
         }
-    }    
+    }   
     Timer {
         id: delayedClear
         interval: masterWindow.morphDuration 

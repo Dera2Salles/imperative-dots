@@ -444,8 +444,6 @@ ShellRoot {
                                 anchors.fill: avatarImg
                                 maskEnabled: true
                                 maskSource: avatarMask
-                                maskThresholdMin: 0.5
-                                maskSpreadAtMin: 1.0
                                 visible: avatarImg.status === Image.Ready
                             }
 

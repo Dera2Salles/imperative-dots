@@ -952,8 +952,6 @@ Item {
                                         anchors.fill: userAvatarImg
                                         maskEnabled: true
                                         maskSource: avatarMaskTab0
-                                        maskThresholdMin: 0.5
-                                        maskSpreadAtMin: 1.0
                                         visible: root.faceIconPath !== "" 
                                     }
                                     

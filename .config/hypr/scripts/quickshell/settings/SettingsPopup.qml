@@ -21,19 +21,55 @@ Item {
         return scaler.s(val); 
     }
 
+    property bool isLayoutDropdownOpen: false
+
     // -------------------------------------------------------------------------
     // KEYBOARD SHORTCUTS
     // -------------------------------------------------------------------------
     Keys.onEscapePressed: {
-        closeSequence.start();
-        event.accepted = true;
+        if (langInput.activeFocus) {
+            langInput.focus = false;
+            event.accepted = true;
+        } else if (wpDirInput.activeFocus) {
+            wpDirInput.focus = false;
+            event.accepted = true;
+        } else if (root.isLayoutDropdownOpen) {
+            root.isLayoutDropdownOpen = false;
+            event.accepted = true;
+        } else {
+            closeSequence.start();
+            event.accepted = true;
+        }
     }
-    Keys.onReturnPressed: {
-        root.saveAppSettings();
-        event.accepted = true;
+    
+    Keys.onPressed: (event) => {
+        if (root.isLayoutDropdownOpen) {
+            if (event.key === Qt.Key_Tab || event.key === Qt.Key_Down) {
+                layoutListView.incrementCurrentIndex();
+                event.accepted = true;
+            } else if (event.key === Qt.Key_Backtab || event.key === Qt.Key_Up) {
+                layoutListView.decrementCurrentIndex();
+                event.accepted = true;
+            }
+        }
     }
-    Keys.onEnterPressed: {
-        root.saveAppSettings();
+
+    Keys.onReturnPressed: (event) => root.handleRootEnter(event)
+    Keys.onEnterPressed: (event) => root.handleRootEnter(event)
+
+    function handleRootEnter(event) {
+        if (root.isLayoutDropdownOpen) {
+            if (layoutListView.currentIndex >= 0 && layoutListView.currentIndex < root.kbToggleModelArr.length) {
+                root.setKbOptions = root.kbToggleModelArr[layoutListView.currentIndex].val;
+            }
+            root.isLayoutDropdownOpen = false;
+            event.accepted = true;
+            return;
+        }
+        
+        if (!langInput.activeFocus && !wpDirInput.activeFocus) {
+            root.saveAppSettings();
+        }
         event.accepted = true;
     }
 
@@ -63,6 +99,8 @@ Item {
     // -------------------------------------------------------------------------
     // SSOT GLOBAL SETTINGS & UPDATES
     // -------------------------------------------------------------------------
+    property int initialWorkspaceCount: 8 
+    
     property real setUiScale: 1.0
     property bool setOpenGuideAtStartup: true
     property bool setTopbarHelpIcon: true
@@ -108,8 +146,14 @@ Item {
         let cmd = "mkdir -p ~/.config/hypr/ && echo '" + jsonString + "' > ~/.config/hypr/settings.json && notify-send 'Quickshell' 'Settings Applied Successfully!'";
                   
         Quickshell.execDetached(["bash", "-c", cmd]);
-    }
+        
+        if (root.setWorkspaceCount !== root.initialWorkspaceCount) {
+        Quickshell.execDetached(["qs", "-p", Quickshell.env("HOME") + "/.config/hypr/scripts/quickshell/TopBar.qml", "ipc", "call", "topbar", "queueReload"]);
 
+            root.initialWorkspaceCount = root.setWorkspaceCount; 
+        }
+    }
+    
     Process {
         id: hyprLangReader
         command: ["bash", "-c", "grep -m1 '^ *kb_layout *=' ~/.config/hypr/hyprland.conf | cut -d'=' -f2 | tr -d ' '"]
@@ -139,7 +183,10 @@ Item {
                         if (parsed.wallpaperDir !== undefined) root.setWallpaperDir = parsed.wallpaperDir;
                         if (parsed.language !== undefined && parsed.language !== "") root.setLanguage = parsed.language;
                         if (parsed.kbOptions !== undefined) root.setKbOptions = parsed.kbOptions;
-                        if (parsed.workspaceCount !== undefined) root.setWorkspaceCount = parsed.workspaceCount;
+                        if (parsed.workspaceCount !== undefined) {
+                            root.setWorkspaceCount = parsed.workspaceCount;
+                            root.initialWorkspaceCount = parsed.workspaceCount; 
+                        }
                     } else {
                         root.saveAppSettings();
                     }
@@ -149,7 +196,7 @@ Item {
             }
         }
     }
-
+    
     ListModel {
         id: langModel
         ListElement { code: "us"; name: "English (US)" }
@@ -182,12 +229,14 @@ Item {
     function updateLangSearch(query) {
         langSearchModel.clear();
         let q = query.trim().toLowerCase();
-        if (q === "") return;
         for (let i = 0; i < langModel.count; i++) {
             let item = langModel.get(i);
-            if (item.code.toLowerCase().includes(q) || item.name.toLowerCase().includes(q)) {
+            if (q === "" || item.code.toLowerCase().includes(q) || item.name.toLowerCase().includes(q)) {
                 langSearchModel.append({ code: item.code, name: item.name });
             }
+        }
+        if (typeof langListView !== "undefined") {
+            langListView.currentIndex = 0; // Automatically highlight first match
         }
     }
 
@@ -201,10 +250,17 @@ Item {
                 if (this.text) {
                     let lines = this.text.trim().split('\n');
                     for (let i = 0; i < lines.length; i++) {
-                        if (lines[i].length > 0) {
-                            pathSuggestModel.append({ path: lines[i] });
+                        let line = lines[i];
+                        if (line.length > 0) {
+                            if (line.endsWith('/')) {
+                                line = line.slice(0, -1);
+                            }
+                            pathSuggestModel.append({ path: line });
                         }
                     }
+                }
+                if (typeof wpSuggestListView !== "undefined") {
+                    wpSuggestListView.currentIndex = 0; // Automatically highlight first match
                 }
             }
         }
@@ -221,15 +277,14 @@ Item {
 
     SequentialAnimation {
         id: startupSequence
-        PauseAnimation { duration: 100 }
+        PauseAnimation { duration: 50 }
         NumberAnimation { 
             target: root
             property: "introContent"
             from: 0.0
             to: 1.0
-            duration: 700
-            easing.type: Easing.OutBack
-            easing.overshoot: 1.05
+            duration: 600
+            easing.type: Easing.OutQuart
         } 
     }
 
@@ -239,11 +294,21 @@ Item {
             target: root
             property: "introContent"
             to: 0.0
-            duration: 250
-            easing.type: Easing.InExpo 
+            duration: 200
+            easing.type: Easing.InQuart
         }
         ScriptAction { 
-            script: Quickshell.execDetached(["bash", Quickshell.env("HOME") + "/.config/hypr/scripts/qs_manager.sh", "close"]) 
+            script: {
+                if (root.requiresReload) {
+                    let script = Quickshell.env("HOME") + "/.config/hypr/scripts/qs_manager.sh close; " +
+                                 "while [ -n \"$(cat /tmp/qs_current_widget 2>/dev/null)\" ]; do sleep 0.1; done; " +
+                                 "sleep 0.2; " + 
+                                 "qs -p ~/.config/hypr/scripts/quickshell/TopBar.qml ipc call topbar forceReload";
+                    Quickshell.execDetached(["bash", "-c", script]);
+                } else {
+                    Quickshell.execDetached(["bash", Quickshell.env("HOME") + "/.config/hypr/scripts/qs_manager.sh", "close"]);
+                }
+            } 
         }
     }
 
@@ -278,7 +343,10 @@ Item {
         Item {
             anchors.fill: parent
             opacity: introContent
-            scale: 0.98 + (0.02 * introContent)
+            scale: 0.96 + (0.04 * introContent)
+            
+            // Using transform Translate so the anchors.fill doesn't ignore the y offset
+            transform: Translate { y: root.s(40) * (1.0 - introContent) }
 
             Flickable {
                 anchors.fill: parent
@@ -292,14 +360,15 @@ Item {
                     width: parent.width - root.s(48)
                     x: root.s(24)
                     y: root.s(24)
-                    spacing: root.s(20)
+                    spacing: root.s(16) // Optimal vertical gap between outer boxes
 
                     // --- HEADER ---
                     RowLayout {
                         Layout.fillWidth: true
+                        Layout.bottomMargin: root.s(8)
                         Text { 
                             text: "Settings"
-                            font.family: "JetBrains Mono"
+                            font.family: "Inter"
                             font.weight: Font.Black
                             font.pixelSize: root.s(26)
                             color: root.text
@@ -312,8 +381,8 @@ Item {
                     // Box 1: Startup & Icons
                     Rectangle {
                         Layout.fillWidth: true
-                        Layout.preferredHeight: col1.implicitHeight + root.s(32)
-                        radius: root.s(12)
+                        Layout.preferredHeight: col1.implicitHeight + root.s(40)
+                        radius: root.s(16) 
                         color: Qt.alpha(root.surface0, 0.5)
                         border.color: root.surface1
                         border.width: 1
@@ -323,8 +392,8 @@ Item {
                             anchors.top: parent.top
                             anchors.left: parent.left
                             anchors.right: parent.right
-                            anchors.margins: root.s(16)
-                            spacing: root.s(16)
+                            anchors.margins: root.s(20) // Restored comfortable inner padding
+                            spacing: root.s(20)
                             
                             RowLayout {
                                 Layout.fillWidth: true
@@ -341,23 +410,29 @@ Item {
                                     spacing: root.s(4)
                                     RowLayout {
                                         Layout.fillWidth: true
-                                        Text { text: "Guide on startup"; font.family: "JetBrains Mono"; font.weight: Font.Bold; font.pixelSize: root.s(13); color: root.text; Layout.fillWidth: true }
+                                        Text { text: "Guide on startup"; font.family: "Inter"; font.weight: Font.Bold; font.pixelSize: root.s(15); color: root.text; Layout.fillWidth: true }
                                         Rectangle {
                                             Layout.alignment: Qt.AlignTop | Qt.AlignRight
                                             Layout.preferredWidth: root.s(40)
                                             Layout.preferredHeight: root.s(24)
                                             radius: root.s(12)
-                                            color: root.setOpenGuideAtStartup ? root.peach : root.surface2
-                                            Behavior on color { ColorAnimation { duration: 200 } }
+                                            scale: toggle1Ma.containsMouse ? 1.05 : 1.0
+                                            Behavior on scale { NumberAnimation { duration: 150; easing.type: Easing.OutBack } }
+                                            
+                                            gradient: Gradient {
+                                                GradientStop { position: 0.0; color: root.setOpenGuideAtStartup ? Qt.lighter(root.peach, 1.1) : root.surface2 }
+                                                GradientStop { position: 1.0; color: root.setOpenGuideAtStartup ? root.peach : root.surface1 }
+                                            }
+
                                             Rectangle {
                                                 width: root.s(18); height: root.s(18); radius: root.s(9); color: root.base
                                                 y: root.s(3); x: root.setOpenGuideAtStartup ? root.s(19) : root.s(3)
                                                 Behavior on x { NumberAnimation { duration: 250; easing.type: Easing.OutBack } }
                                             }
-                                            MouseArea { anchors.fill: parent; onClicked: root.setOpenGuideAtStartup = !root.setOpenGuideAtStartup; cursorShape: Qt.PointingHandCursor }
+                                            MouseArea { id: toggle1Ma; anchors.fill: parent; hoverEnabled: true; onClicked: root.setOpenGuideAtStartup = !root.setOpenGuideAtStartup; cursorShape: Qt.PointingHandCursor }
                                         }
                                     }
-                                    Text { text: "Launch on login"; font.family: "JetBrains Mono"; font.pixelSize: root.s(11); color: root.subtext0; Layout.fillWidth: true }
+                                    Text { text: "Launch on login"; font.family: "Inter"; font.pixelSize: root.s(12); color: Qt.alpha(root.subtext0, 0.7); Layout.fillWidth: true }
                                 }
                             }
                             
@@ -378,23 +453,29 @@ Item {
                                     spacing: root.s(4)
                                     RowLayout {
                                         Layout.fillWidth: true
-                                        Text { text: "Help icon"; font.family: "JetBrains Mono"; font.weight: Font.Bold; font.pixelSize: root.s(13); color: root.text; Layout.fillWidth: true }
+                                        Text { text: "Help icon"; font.family: "Inter"; font.weight: Font.Bold; font.pixelSize: root.s(15); color: root.text; Layout.fillWidth: true }
                                         Rectangle {
                                             Layout.alignment: Qt.AlignTop | Qt.AlignRight
                                             Layout.preferredWidth: root.s(40)
                                             Layout.preferredHeight: root.s(24)
                                             radius: root.s(12)
-                                            color: root.setTopbarHelpIcon ? root.blue : root.surface2
-                                            Behavior on color { ColorAnimation { duration: 200 } }
+                                            scale: toggle2Ma.containsMouse ? 1.05 : 1.0
+                                            Behavior on scale { NumberAnimation { duration: 150; easing.type: Easing.OutBack } }
+
+                                            gradient: Gradient {
+                                                GradientStop { position: 0.0; color: root.setTopbarHelpIcon ? Qt.lighter(root.blue, 1.2) : root.surface2 }
+                                                GradientStop { position: 1.0; color: root.setTopbarHelpIcon ? root.blue : root.surface1 }
+                                            }
+
                                             Rectangle {
                                                 width: root.s(18); height: root.s(18); radius: root.s(9); color: root.base
                                                 y: root.s(3); x: root.setTopbarHelpIcon ? root.s(19) : root.s(3)
                                                 Behavior on x { NumberAnimation { duration: 250; easing.type: Easing.OutBack } }
                                             }
-                                            MouseArea { anchors.fill: parent; onClicked: root.setTopbarHelpIcon = !root.setTopbarHelpIcon; cursorShape: Qt.PointingHandCursor }
+                                            MouseArea { id: toggle2Ma; anchors.fill: parent; hoverEnabled: true; onClicked: root.setTopbarHelpIcon = !root.setTopbarHelpIcon; cursorShape: Qt.PointingHandCursor }
                                         }
                                     }
-                                    Text { text: "Show button in topbar"; font.family: "JetBrains Mono"; font.pixelSize: root.s(11); color: root.subtext0; Layout.fillWidth: true }
+                                    Text { text: "Show button in topbar"; font.family: "Inter"; font.pixelSize: root.s(12); color: Qt.alpha(root.subtext0, 0.7); Layout.fillWidth: true }
                                 }
                             }
                         }
@@ -403,8 +484,8 @@ Item {
                     // Box 2: UI Scale
                     Rectangle {
                         Layout.fillWidth: true
-                        Layout.preferredHeight: col2.implicitHeight + root.s(32)
-                        radius: root.s(12)
+                        Layout.preferredHeight: col2.implicitHeight + root.s(40)
+                        radius: root.s(16)
                         color: Qt.alpha(root.surface0, 0.5)
                         border.color: root.surface1
                         border.width: 1
@@ -414,55 +495,52 @@ Item {
                             anchors.top: parent.top
                             anchors.left: parent.left
                             anchors.right: parent.right
-                            anchors.margins: root.s(16)
+                            anchors.margins: root.s(20)
                             
                             RowLayout {
                                 Layout.fillWidth: true
                                 spacing: root.s(16)
                                 Item {
                                     Layout.preferredWidth: root.s(24)
-                                    Layout.alignment: Qt.AlignTop
-                                    Layout.topMargin: root.s(2)
-                                    Text { anchors.top: parent.top; anchors.horizontalCenter: parent.horizontalCenter; text: "󰁦"; font.family: "Iosevka Nerd Font"; font.pixelSize: root.s(20); color: root.sapphire }
+                                    Layout.alignment: Qt.AlignVCenter
+                                    Text { anchors.centerIn: parent; text: "󰁦"; font.family: "Iosevka Nerd Font"; font.pixelSize: root.s(20); color: root.sapphire }
                                 }
                                 ColumnLayout {
                                     Layout.fillWidth: true
-                                    Layout.alignment: Qt.AlignTop
+                                    Layout.alignment: Qt.AlignVCenter
                                     spacing: root.s(4)
-                                    Text { text: "UI Scale"; font.family: "JetBrains Mono"; font.weight: Font.Bold; font.pixelSize: root.s(13); color: root.text; Layout.fillWidth: true }
-                                    Text { text: "Base size scalar"; font.family: "JetBrains Mono"; font.pixelSize: root.s(11); color: root.subtext0; Layout.fillWidth: true }
-                                    
-                                    RowLayout {
-                                        Layout.topMargin: root.s(8)
-                                        spacing: root.s(12)
-                                        Rectangle {
-                                            width: root.s(30); height: root.s(30); radius: root.s(8)
-                                            color: sMinusMa.pressed ? root.surface2 : root.surface1
-                                            border.color: sMinusMa.containsMouse ? root.sapphire : "transparent"
-                                            border.width: 1
-                                            Behavior on color { ColorAnimation { duration: 150 } }
-                                            Text { anchors.centerIn: parent; text: "-"; font.family: "JetBrains Mono"; font.weight: Font.Bold; font.pixelSize: root.s(16); color: root.text }
-                                            MouseArea { id: sMinusMa; anchors.fill: parent; hoverEnabled: true; onClicked: root.setUiScale = Math.max(0.5, (root.setUiScale - 0.1).toFixed(1)) }
-                                        }
-                                        Text { 
-                                            text: root.setUiScale.toFixed(1) + "x"
-                                            font.family: "JetBrains Mono"
-                                            font.weight: Font.Black
-                                            font.pixelSize: root.s(14)
-                                            color: root.sapphire
-                                            Layout.minimumWidth: root.s(40)
-                                            horizontalAlignment: Text.AlignHCenter 
-                                        }
-                                        Rectangle {
-                                            width: root.s(30); height: root.s(30); radius: root.s(8)
-                                            color: sPlusMa.pressed ? root.surface2 : root.surface1
-                                            border.color: sPlusMa.containsMouse ? root.sapphire : "transparent"
-                                            border.width: 1
-                                            Behavior on color { ColorAnimation { duration: 150 } }
-                                            Text { anchors.centerIn: parent; text: "+"; font.family: "JetBrains Mono"; font.weight: Font.Bold; font.pixelSize: root.s(16); color: root.text }
-                                            MouseArea { id: sPlusMa; anchors.fill: parent; hoverEnabled: true; onClicked: root.setUiScale = Math.min(2.0, (root.setUiScale + 0.1).toFixed(1)) }
-                                        }
-                                        Item { Layout.fillWidth: true }
+                                    Text { text: "UI Scale"; font.family: "Inter"; font.weight: Font.Bold; font.pixelSize: root.s(15); color: root.text; Layout.fillWidth: true }
+                                    Text { text: "Base size scalar"; font.family: "Inter"; font.pixelSize: root.s(12); color: Qt.alpha(root.subtext0, 0.7); Layout.fillWidth: true }
+                                }
+                                RowLayout {
+                                    Layout.alignment: Qt.AlignVCenter | Qt.AlignRight
+                                    spacing: root.s(12)
+                                    Rectangle {
+                                        width: root.s(30); height: root.s(30); radius: root.s(8)
+                                        color: sMinusMa.pressed ? Qt.alpha(root.sapphire, 0.4) : (sMinusMa.containsMouse ? root.surface2 : root.surface1)
+                                        scale: sMinusMa.pressed ? 0.90 : (sMinusMa.containsMouse ? 1.08 : 1.0)
+                                        Behavior on scale { NumberAnimation { duration: 250; easing.type: Easing.OutQuart } }
+                                        Behavior on color { ColorAnimation { duration: 250; easing.type: Easing.OutQuart } }
+                                        Text { anchors.centerIn: parent; text: "-"; font.family: "JetBrains Mono"; font.weight: Font.Bold; font.pixelSize: root.s(16); color: sMinusMa.pressed ? root.sapphire : root.text }
+                                        MouseArea { id: sMinusMa; anchors.fill: parent; hoverEnabled: true; onClicked: root.setUiScale = Math.max(0.5, (root.setUiScale - 0.1).toFixed(1)) }
+                                    }
+                                    Text { 
+                                        text: root.setUiScale.toFixed(1) + "x"
+                                        font.family: "JetBrains Mono"
+                                        font.weight: Font.Black
+                                        font.pixelSize: root.s(14)
+                                        color: root.sapphire
+                                        Layout.minimumWidth: root.s(40)
+                                        horizontalAlignment: Text.AlignHCenter 
+                                    }
+                                    Rectangle {
+                                        width: root.s(30); height: root.s(30); radius: root.s(8)
+                                        color: sPlusMa.pressed ? Qt.alpha(root.sapphire, 0.4) : (sPlusMa.containsMouse ? root.surface2 : root.surface1)
+                                        scale: sPlusMa.pressed ? 0.90 : (sPlusMa.containsMouse ? 1.08 : 1.0)
+                                        Behavior on scale { NumberAnimation { duration: 250; easing.type: Easing.OutQuart } }
+                                        Behavior on color { ColorAnimation { duration: 250; easing.type: Easing.OutQuart } }
+                                        Text { anchors.centerIn: parent; text: "+"; font.family: "JetBrains Mono"; font.weight: Font.Bold; font.pixelSize: root.s(16); color: sPlusMa.pressed ? root.sapphire : root.text }
+                                        MouseArea { id: sPlusMa; anchors.fill: parent; hoverEnabled: true; onClicked: root.setUiScale = Math.min(2.0, (root.setUiScale + 0.1).toFixed(1)) }
                                     }
                                 }
                             }
@@ -472,8 +550,8 @@ Item {
                     // Box 3: Keyboard Language & Switcher
                     Rectangle {
                         Layout.fillWidth: true
-                        Layout.preferredHeight: col3.implicitHeight + root.s(32)
-                        radius: root.s(12)
+                        Layout.preferredHeight: col3.implicitHeight + root.s(40)
+                        radius: root.s(16)
                         color: Qt.alpha(root.surface0, 0.5)
                         border.color: root.surface1
                         border.width: 1
@@ -483,8 +561,8 @@ Item {
                             anchors.top: parent.top
                             anchors.left: parent.left
                             anchors.right: parent.right
-                            anchors.margins: root.s(16)
-                            spacing: root.s(16)
+                            anchors.margins: root.s(20)
+                            spacing: root.s(20)
                             
                             // Part 1: Language
                             RowLayout {
@@ -500,13 +578,13 @@ Item {
                                     Layout.fillWidth: true
                                     Layout.alignment: Qt.AlignTop
                                     spacing: root.s(4)
-                                    Text { text: "Keyboard layouts"; font.family: "JetBrains Mono"; font.weight: Font.Bold; font.pixelSize: root.s(13); color: root.text; Layout.fillWidth: true }
-                                    Text { text: "Matches hyprland.conf. Click ✖ to remove."; font.family: "JetBrains Mono"; font.pixelSize: root.s(11); color: root.subtext0; Layout.fillWidth: true }
+                                    Text { text: "Keyboard layouts"; font.family: "Inter"; font.weight: Font.Bold; font.pixelSize: root.s(15); color: root.text; Layout.fillWidth: true }
+                                    Text { text: "Matches hyprland.conf. Click ✖ to remove."; font.family: "Inter"; font.pixelSize: root.s(12); color: Qt.alpha(root.subtext0, 0.7); Layout.fillWidth: true }
                                     
                                     Flow {
                                         Layout.fillWidth: true
                                         spacing: root.s(8)
-                                        Layout.topMargin: root.s(6)
+                                        Layout.topMargin: root.s(10)
                                         Repeater {
                                             model: root.setLanguage ? root.setLanguage.split(",").filter(x => x.trim() !== "") : []
                                             Rectangle {
@@ -514,9 +592,13 @@ Item {
                                                 height: root.s(28)
                                                 radius: root.s(14)
                                                 color: root.surface1
-                                                border.color: chipMa.containsMouse ? root.red : root.surface2
-                                                border.width: 1
+                                                border.color: chipMa.containsMouse ? root.red : "transparent"
+                                                border.width: chipMa.containsMouse ? 1 : 0
+                                                scale: chipMa.containsMouse ? 1.05 : 1.0
+
+                                                Behavior on scale { NumberAnimation { duration: 150; easing.type: Easing.OutBack } }
                                                 Behavior on border.color { ColorAnimation { duration: 150 } }
+
                                                 RowLayout {
                                                     id: langChipLayout
                                                     anchors.centerIn: parent
@@ -556,12 +638,13 @@ Item {
                                     Rectangle {
                                         Layout.fillWidth: true
                                         Layout.preferredHeight: root.s(36)
-                                        Layout.topMargin: root.s(8)
-                                        radius: root.s(6)
+                                        Layout.topMargin: root.s(10)
+                                        radius: root.s(8)
                                         color: root.surface0
                                         border.color: langInput.activeFocus ? root.green : root.surface2
                                         border.width: 1
                                         Behavior on border.color { ColorAnimation { duration: 200 } }
+
                                         TextInput {
                                             id: langInput
                                             anchors.fill: parent
@@ -572,38 +655,82 @@ Item {
                                             color: root.text
                                             clip: true
                                             selectByMouse: true
+                                            
+                                            // Intercept Keyboard Navigation & Submission
+                                            Keys.onPressed: (event) => {
+                                                if (event.key === Qt.Key_Tab || event.key === Qt.Key_Down) {
+                                                    if (langSearchModel.count > 0) {
+                                                        langListView.incrementCurrentIndex();
+                                                        event.accepted = true;
+                                                    }
+                                                } else if (event.key === Qt.Key_Backtab || event.key === Qt.Key_Up) {
+                                                    if (langSearchModel.count > 0) {
+                                                        langListView.decrementCurrentIndex();
+                                                        event.accepted = true;
+                                                    }
+                                                }
+                                            }
+
+                                            Keys.onReturnPressed: (event) => langInputAccept(event)
+                                            Keys.onEnterPressed: (event) => langInputAccept(event)
+
+                                            function langInputAccept(event) {
+                                                if (langSearchModel.count > 0 && langListView.currentIndex >= 0) {
+                                                    let item = langSearchModel.get(langListView.currentIndex);
+                                                    let arr = root.setLanguage ? root.setLanguage.split(",").filter(x => x.trim() !== "") : [];
+                                                    if (!arr.includes(item.code)) {
+                                                        arr.push(item.code);
+                                                        root.setLanguage = arr.join(",");
+                                                    }
+                                                }
+                                                text = "";
+                                                focus = false;
+                                                event.accepted = true;
+                                            }
+
+                                            onActiveFocusChanged: {
+                                                if (activeFocus) {
+                                                    root.updateLangSearch(text);
+                                                }
+                                            }
                                             onTextChanged: { root.updateLangSearch(text); }
-                                            onAccepted: root.saveAppSettings()
-                                            Text { text: "Search to add..."; color: root.subtext0; visible: !parent.text && !parent.activeFocus; font: parent.font; anchors.verticalCenter: parent.verticalCenter }
+                                            
+                                            Text { text: "Search to add..."; color: Qt.alpha(root.subtext0, 0.7); visible: !parent.text && !parent.activeFocus; font: parent.font; anchors.verticalCenter: parent.verticalCenter }
                                         }
                                     }
 
                                     // Expanding List Container
                                     Rectangle {
                                         Layout.fillWidth: true
-                                        Layout.preferredHeight: langInput.activeFocus && langSearchModel.count > 0 ? Math.min(root.s(150), langSearchModel.count * root.s(32)) : 0
-                                        radius: root.s(6)
+                                        Layout.preferredHeight: langInput.activeFocus && langSearchModel.count > 0 ? Math.min(root.s(160), langSearchModel.count * root.s(32)) : 0
+                                        radius: root.s(8) 
                                         color: root.surface0
-                                        border.color: root.green
-                                        border.width: Layout.preferredHeight > 0 ? 1 : 0
+                                        border.width: 0
                                         clip: true
+                                        
                                         Behavior on Layout.preferredHeight { NumberAnimation { duration: 250; easing.type: Easing.OutExpo } }
+                                        
                                         ListView {
+                                            id: langListView
                                             anchors.fill: parent
                                             model: langSearchModel
                                             interactive: true
+                                            opacity: parent.Layout.preferredHeight > root.s(10) ? 1.0 : 0.0
+                                            Behavior on opacity { NumberAnimation { duration: 200 } }
+
                                             ScrollBar.vertical: ScrollBar { active: true; policy: ScrollBar.AsNeeded }
                                             delegate: Rectangle {
                                                 width: parent.width
                                                 height: root.s(32)
-                                                color: sMa.containsMouse ? root.surface2 : "transparent"
+                                                // Highlight currentIndex properly
+                                                color: sMa.containsMouse ? root.surface2 : (ListView.isCurrentItem ? root.surface1 : "transparent")
                                                 RowLayout {
                                                     anchors.fill: parent
                                                     anchors.leftMargin: root.s(12)
                                                     anchors.rightMargin: root.s(12)
                                                     spacing: root.s(10)
                                                     Text { text: model.code; font.family: "JetBrains Mono"; font.weight: Font.Bold; font.pixelSize: root.s(12); color: root.text }
-                                                    Text { text: model.name; font.family: "JetBrains Mono"; font.pixelSize: root.s(11); color: root.subtext0; elide: Text.ElideRight; Layout.fillWidth: true }
+                                                    Text { text: model.name; font.family: "Inter"; font.pixelSize: root.s(12); color: Qt.alpha(root.subtext0, 0.7); elide: Text.ElideRight; Layout.fillWidth: true }
                                                 }
                                                 MouseArea {
                                                     id: sMa
@@ -633,7 +760,6 @@ Item {
                                 id: layoutSwitcherBox
                                 Layout.fillWidth: true
                                 spacing: root.s(16)
-                                property bool isDropdownOpen: false
 
                                 Item {
                                     Layout.preferredWidth: root.s(24)
@@ -646,19 +772,20 @@ Item {
                                     Layout.fillWidth: true
                                     Layout.alignment: Qt.AlignTop
                                     spacing: root.s(4)
-                                    Text { text: "Layout shortcut"; font.family: "JetBrains Mono"; font.weight: Font.Bold; font.pixelSize: root.s(13); color: root.text; Layout.fillWidth: true }
-                                    Text { text: "Toggle combination"; font.family: "JetBrains Mono"; font.pixelSize: root.s(11); color: root.subtext0; Layout.fillWidth: true }
+                                    Text { text: "Layout shortcut"; font.family: "Inter"; font.weight: Font.Bold; font.pixelSize: root.s(15); color: root.text; Layout.fillWidth: true }
+                                    Text { text: "Toggle combination"; font.family: "Inter"; font.pixelSize: root.s(12); color: Qt.alpha(root.subtext0, 0.7); Layout.fillWidth: true }
 
                                     // Switcher Selection Header
                                     Rectangle {
                                         Layout.fillWidth: true
                                         Layout.preferredHeight: root.s(36)
-                                        Layout.topMargin: root.s(8)
-                                        radius: root.s(6)
+                                        Layout.topMargin: root.s(10)
+                                        radius: root.s(8)
                                         color: root.surface0
-                                        border.color: layoutSwitcherBox.isDropdownOpen ? root.green : root.surface2
+                                        border.color: root.isLayoutDropdownOpen ? root.green : root.surface2
                                         border.width: 1
                                         Behavior on border.color { ColorAnimation { duration: 200 } }
+
                                         RowLayout {
                                             anchors.fill: parent
                                             anchors.margins: root.s(10)
@@ -670,7 +797,7 @@ Item {
                                                 Layout.fillWidth: true 
                                             }
                                             Text { 
-                                                text: layoutSwitcherBox.isDropdownOpen ? "▴" : "▾"
+                                                text: root.isLayoutDropdownOpen ? "▴" : "▾"
                                                 font.pixelSize: root.s(14)
                                                 color: root.subtext0 
                                             }
@@ -678,28 +805,41 @@ Item {
                                         MouseArea {
                                             anchors.fill: parent
                                             cursorShape: Qt.PointingHandCursor
-                                            onClicked: layoutSwitcherBox.isDropdownOpen = !layoutSwitcherBox.isDropdownOpen
+                                            onClicked: {
+                                                root.isLayoutDropdownOpen = !root.isLayoutDropdownOpen;
+                                                if (root.isLayoutDropdownOpen) {
+                                                    let idx = root.kbToggleModelArr.findIndex(x => x.val === root.setKbOptions);
+                                                    layoutListView.currentIndex = Math.max(0, idx);
+                                                }
+                                                root.forceActiveFocus(); // Grab focus to let root manage Tab/Enter events
+                                            }
                                         }
                                     }
 
                                     // Expanding Switcher Dropdown
                                     Rectangle {
                                         Layout.fillWidth: true
-                                        Layout.preferredHeight: layoutSwitcherBox.isDropdownOpen ? root.kbToggleModelArr.length * root.s(32) : 0
-                                        radius: root.s(6)
+                                        Layout.preferredHeight: root.isLayoutDropdownOpen ? root.kbToggleModelArr.length * root.s(32) : 0
+                                        radius: root.s(8)
                                         color: root.surface0
-                                        border.color: root.green
-                                        border.width: Layout.preferredHeight > 0 ? 1 : 0
+                                        border.width: 0
                                         clip: true
+
                                         Behavior on Layout.preferredHeight { NumberAnimation { duration: 250; easing.type: Easing.OutExpo } }
+                                        
                                         ListView {
+                                            id: layoutListView
                                             anchors.fill: parent
                                             model: root.kbToggleModelArr
                                             interactive: false
+                                            opacity: parent.Layout.preferredHeight > root.s(10) ? 1.0 : 0.0
+                                            Behavior on opacity { NumberAnimation { duration: 200 } }
+
                                             delegate: Rectangle {
                                                 width: parent.width
                                                 height: root.s(32)
-                                                color: toggleMa.containsMouse ? root.surface2 : "transparent"
+                                                // Highlight index using keyboard
+                                                color: toggleMa.containsMouse ? root.surface2 : (ListView.isCurrentItem ? root.surface1 : "transparent")
                                                 RowLayout {
                                                     anchors.fill: parent
                                                     anchors.leftMargin: root.s(12)
@@ -719,33 +859,32 @@ Item {
                                                     cursorShape: Qt.PointingHandCursor
                                                     onClicked: {
                                                         root.setKbOptions = modelData.val;
-                                                        layoutSwitcherBox.isDropdownOpen = false;
+                                                        root.isLayoutDropdownOpen = false;
                                                     }
                                                 }
                                             }
                                         }
                                     }
                                 }
-                            }
+                            }                       
                         }
                     }
 
                     // Box 4: Wallpaper Directory
                     Rectangle {
                         Layout.fillWidth: true
-                        Layout.preferredHeight: col4.implicitHeight + root.s(32)
-                        radius: root.s(12)
+                        Layout.preferredHeight: col4.implicitHeight + root.s(40)
+                        radius: root.s(16)
                         color: Qt.alpha(root.surface0, 0.5)
-                        border.color: wpDirInput.activeFocus ? root.mauve : root.surface1
+                        border.color: root.surface1
                         border.width: 1
-                        Behavior on border.color { ColorAnimation { duration: 150 } }
                         
                         ColumnLayout {
                             id: col4
                             anchors.top: parent.top
                             anchors.left: parent.left
                             anchors.right: parent.right
-                            anchors.margins: root.s(16)
+                            anchors.margins: root.s(20)
                             
                             RowLayout {
                                 Layout.fillWidth: true
@@ -760,19 +899,20 @@ Item {
                                     Layout.fillWidth: true
                                     Layout.alignment: Qt.AlignTop
                                     spacing: root.s(4)
-                                    Text { text: "Wallpaper directory"; font.family: "JetBrains Mono"; font.weight: Font.Bold; font.pixelSize: root.s(13); color: root.text; Layout.fillWidth: true }
-                                    Text { text: "Absolute source path"; font.family: "JetBrains Mono"; font.pixelSize: root.s(11); color: root.subtext0; Layout.fillWidth: true }
+                                    Text { text: "Wallpaper directory"; font.family: "Inter"; font.weight: Font.Bold; font.pixelSize: root.s(15); color: root.text; Layout.fillWidth: true }
+                                    Text { text: "Absolute source path"; font.family: "Inter"; font.pixelSize: root.s(12); color: Qt.alpha(root.subtext0, 0.7); Layout.fillWidth: true }
                                     
                                     // Text Input
                                     Rectangle {
                                         Layout.fillWidth: true
                                         Layout.preferredHeight: root.s(36)
-                                        Layout.topMargin: root.s(8)
-                                        radius: root.s(6)
+                                        Layout.topMargin: root.s(10)
+                                        radius: root.s(8)
                                         color: root.surface0
                                         border.color: wpDirInput.activeFocus ? root.mauve : root.surface2
                                         border.width: 1
                                         Behavior on border.color { ColorAnimation { duration: 200 } }
+
                                         TextInput {
                                             id: wpDirInput
                                             anchors.fill: parent
@@ -784,6 +924,45 @@ Item {
                                             color: root.text
                                             clip: true
                                             selectByMouse: true
+
+                                            // Intercept Keys for dropdown
+                                            Keys.onPressed: (event) => {
+                                                if (event.key === Qt.Key_Tab || event.key === Qt.Key_Down) {
+                                                    if (pathSuggestModel.count > 0) {
+                                                        wpSuggestListView.incrementCurrentIndex();
+                                                        event.accepted = true;
+                                                    }
+                                                } else if (event.key === Qt.Key_Backtab || event.key === Qt.Key_Up) {
+                                                    if (pathSuggestModel.count > 0) {
+                                                        wpSuggestListView.decrementCurrentIndex();
+                                                        event.accepted = true;
+                                                    }
+                                                }
+                                            }
+
+                                            Keys.onReturnPressed: (event) => wpDirInputAccept(event)
+                                            Keys.onEnterPressed: (event) => wpDirInputAccept(event)
+
+                                            function wpDirInputAccept(event) {
+                                                if (pathSuggestModel.count > 0 && wpSuggestListView.currentIndex >= 0) {
+                                                    let item = pathSuggestModel.get(wpSuggestListView.currentIndex);
+                                                    if (item) {
+                                                        text = item.path;
+                                                        root.setWallpaperDir = text;
+                                                    }
+                                                }
+                                                pathSuggestModel.clear();
+                                                focus = false;
+                                                event.accepted = true;
+                                            }
+
+                                            onActiveFocusChanged: {
+                                                if (activeFocus) {
+                                                    pathSuggestProc.query = text; 
+                                                    pathSuggestProc.running = false; 
+                                                    pathSuggestProc.running = true; 
+                                                }
+                                            }
                                             onTextChanged: { 
                                                 root.setWallpaperDir = text; 
                                                 if (activeFocus) { 
@@ -792,7 +971,6 @@ Item {
                                                     pathSuggestProc.running = true; 
                                                 } 
                                             }
-                                            onAccepted: root.saveAppSettings()
                                         }
                                     }
 
@@ -800,20 +978,26 @@ Item {
                                     Rectangle {
                                         Layout.fillWidth: true
                                         Layout.preferredHeight: wpDirInput.activeFocus && pathSuggestModel.count > 0 ? pathSuggestModel.count * root.s(30) : 0
-                                        radius: root.s(6)
+                                        radius: root.s(8)
                                         color: root.surface0
-                                        border.color: root.mauve
-                                        border.width: Layout.preferredHeight > 0 ? 1 : 0
+                                        border.width: 0
                                         clip: true
+
                                         Behavior on Layout.preferredHeight { NumberAnimation { duration: 250; easing.type: Easing.OutExpo } }
+                                        
                                         ListView {
+                                            id: wpSuggestListView
                                             anchors.fill: parent
                                             model: pathSuggestModel
                                             interactive: false
+                                            opacity: parent.Layout.preferredHeight > root.s(10) ? 1.0 : 0.0
+                                            Behavior on opacity { NumberAnimation { duration: 200 } }
+
                                             delegate: Rectangle {
                                                 width: parent.width
                                                 height: root.s(30)
-                                                color: suggestMa.containsMouse ? root.surface2 : "transparent"
+                                                // Highlight index visuals
+                                                color: suggestMa.containsMouse ? root.surface2 : (ListView.isCurrentItem ? root.surface1 : "transparent")
                                                 Text { 
                                                     anchors.verticalCenter: parent.verticalCenter
                                                     x: root.s(12)
@@ -846,8 +1030,8 @@ Item {
                     // Box 5: Workspace Count
                     Rectangle {
                         Layout.fillWidth: true
-                        Layout.preferredHeight: col5.implicitHeight + root.s(32)
-                        radius: root.s(12)
+                        Layout.preferredHeight: col5.implicitHeight + root.s(40)
+                        radius: root.s(16)
                         color: Qt.alpha(root.surface0, 0.5)
                         border.color: root.surface1
                         border.width: 1
@@ -857,55 +1041,52 @@ Item {
                             anchors.top: parent.top
                             anchors.left: parent.left
                             anchors.right: parent.right
-                            anchors.margins: root.s(16)
+                            anchors.margins: root.s(20)
                             
                             RowLayout {
                                 Layout.fillWidth: true
                                 spacing: root.s(16)
                                 Item {
                                     Layout.preferredWidth: root.s(24)
-                                    Layout.alignment: Qt.AlignTop
-                                    Layout.topMargin: root.s(2)
-                                    Text { anchors.top: parent.top; anchors.horizontalCenter: parent.horizontalCenter; text: "󰽿"; font.family: "Iosevka Nerd Font"; font.pixelSize: root.s(20); color: root.yellow }
+                                    Layout.alignment: Qt.AlignVCenter
+                                    Text { anchors.centerIn: parent; text: "󰽿"; font.family: "Iosevka Nerd Font"; font.pixelSize: root.s(20); color: root.yellow }
                                 }
                                 ColumnLayout {
                                     Layout.fillWidth: true
-                                    Layout.alignment: Qt.AlignTop
+                                    Layout.alignment: Qt.AlignVCenter
                                     spacing: root.s(4)
-                                    Text { text: "Workspaces"; font.family: "JetBrains Mono"; font.weight: Font.Bold; font.pixelSize: root.s(13); color: root.text; Layout.fillWidth: true }
-                                    Text { text: "Static count in topbar"; font.family: "JetBrains Mono"; font.pixelSize: root.s(11); color: root.subtext0; Layout.fillWidth: true }
-                                    
-                                    RowLayout {
-                                        Layout.topMargin: root.s(8)
-                                        spacing: root.s(12)
-                                        Rectangle {
-                                            width: root.s(30); height: root.s(30); radius: root.s(8)
-                                            color: wsMinusMa.pressed ? root.surface2 : root.surface1
-                                            border.color: wsMinusMa.containsMouse ? root.yellow : "transparent"
-                                            border.width: 1
-                                            Behavior on color { ColorAnimation { duration: 150 } }
-                                            Text { anchors.centerIn: parent; text: "-"; font.family: "JetBrains Mono"; font.weight: Font.Bold; font.pixelSize: root.s(16); color: root.text }
-                                            MouseArea { id: wsMinusMa; anchors.fill: parent; hoverEnabled: true; onClicked: root.setWorkspaceCount = Math.max(1, root.setWorkspaceCount - 1) }
-                                        }
-                                        Text { 
-                                            text: root.setWorkspaceCount.toString()
-                                            font.family: "JetBrains Mono"
-                                            font.weight: Font.Black
-                                            font.pixelSize: root.s(14)
-                                            color: root.yellow
-                                            Layout.minimumWidth: root.s(40)
-                                            horizontalAlignment: Text.AlignHCenter 
-                                        }
-                                        Rectangle {
-                                            width: root.s(30); height: root.s(30); radius: root.s(8)
-                                            color: wsPlusMa.pressed ? root.surface2 : root.surface1
-                                            border.color: wsPlusMa.containsMouse ? root.yellow : "transparent"
-                                            border.width: 1
-                                            Behavior on color { ColorAnimation { duration: 150 } }
-                                            Text { anchors.centerIn: parent; text: "+"; font.family: "JetBrains Mono"; font.weight: Font.Bold; font.pixelSize: root.s(16); color: root.text }
-                                            MouseArea { id: wsPlusMa; anchors.fill: parent; hoverEnabled: true; onClicked: root.setWorkspaceCount = Math.min(20, root.setWorkspaceCount + 1) }
-                                        }
-                                        Item { Layout.fillWidth: true }
+                                    Text { text: "Workspaces"; font.family: "Inter"; font.weight: Font.Bold; font.pixelSize: root.s(15); color: root.text; Layout.fillWidth: true }
+                                    Text { text: "Static count in topbar"; font.family: "Inter"; font.pixelSize: root.s(12); color: Qt.alpha(root.subtext0, 0.7); Layout.fillWidth: true }
+                                }
+                                RowLayout {
+                                    Layout.alignment: Qt.AlignVCenter | Qt.AlignRight
+                                    spacing: root.s(12)
+                                    Rectangle {
+                                        width: root.s(30); height: root.s(30); radius: root.s(8)
+                                        color: wsMinusMa.pressed ? Qt.alpha(root.yellow, 0.4) : (wsMinusMa.containsMouse ? root.surface2 : root.surface1)
+                                        scale: wsMinusMa.pressed ? 0.90 : (wsMinusMa.containsMouse ? 1.08 : 1.0)
+                                        Behavior on scale { NumberAnimation { duration: 250; easing.type: Easing.OutQuart } }
+                                        Behavior on color { ColorAnimation { duration: 250; easing.type: Easing.OutQuart } }
+                                        Text { anchors.centerIn: parent; text: "-"; font.family: "JetBrains Mono"; font.weight: Font.Bold; font.pixelSize: root.s(16); color: wsMinusMa.pressed ? root.yellow : root.text }
+                                        MouseArea { id: wsMinusMa; anchors.fill: parent; hoverEnabled: true; onClicked: root.setWorkspaceCount = Math.max(2, root.setWorkspaceCount - 1) }
+                                    }
+                                    Text { 
+                                        text: root.setWorkspaceCount.toString()
+                                        font.family: "JetBrains Mono"
+                                        font.weight: Font.Black
+                                        font.pixelSize: root.s(14)
+                                        color: root.yellow
+                                        Layout.minimumWidth: root.s(40)
+                                        horizontalAlignment: Text.AlignHCenter 
+                                    }
+                                    Rectangle {
+                                        width: root.s(30); height: root.s(30); radius: root.s(8)
+                                        color: wsPlusMa.pressed ? Qt.alpha(root.yellow, 0.4) : (wsPlusMa.containsMouse ? root.surface2 : root.surface1)
+                                        scale: wsPlusMa.pressed ? 0.90 : (wsPlusMa.containsMouse ? 1.08 : 1.0)
+                                        Behavior on scale { NumberAnimation { duration: 250; easing.type: Easing.OutQuart } }
+                                        Behavior on color { ColorAnimation { duration: 250; easing.type: Easing.OutQuart } }
+                                        Text { anchors.centerIn: parent; text: "+"; font.family: "JetBrains Mono"; font.weight: Font.Bold; font.pixelSize: root.s(16); color: wsPlusMa.pressed ? root.yellow : root.text }
+                                        MouseArea { id: wsPlusMa; anchors.fill: parent; hoverEnabled: true; onClicked: root.setWorkspaceCount = Math.min(10, root.setWorkspaceCount + 1) }
                                     }
                                 }
                             }
@@ -915,20 +1096,34 @@ Item {
                 }
             }
             
-            // --- NEW PILL SAVE BUTTON ---
             Rectangle {
                 id: floatingSaveBtn
-                width: saveRow.implicitWidth + root.s(32)
+                width: saveRow.implicitWidth + root.s(40)
                 height: root.s(40)
                 anchors.bottom: parent.bottom
                 anchors.right: parent.right
                 anchors.margins: root.s(24)
-                radius: height / 2
-                color: mainSaveMa.pressed ? Qt.darker(root.mauve, 1.2) : (mainSaveMa.containsMouse ? root.mauve : root.surface0)
-                border.color: root.mauve
+                radius: height / 2 // Retain as pure pill shape
+                
+                // Subtle border that disappears on hover so the gradient pops cleanly
+                border.color: mainSaveMa.containsMouse ? "transparent" : Qt.alpha(root.mauve, 0.5)
                 border.width: 1
                 
-                Behavior on color { ColorAnimation { duration: 150 } }
+                // Matching the premium tactile push-in animation from the +/- buttons
+                scale: mainSaveMa.pressed ? 0.95 : (mainSaveMa.containsMouse ? 1.05 : 1.0)
+                Behavior on scale { NumberAnimation { duration: 250; easing.type: Easing.OutQuart } }
+
+                // Clean, monochromatic brightness shift (no muddy color clashing)
+                gradient: Gradient {
+                    GradientStop { 
+                        position: 0.0; 
+                        color: mainSaveMa.pressed ? root.mauve : (mainSaveMa.containsMouse ? Qt.lighter(root.mauve, 1.3) : root.surface0) 
+                    }
+                    GradientStop { 
+                        position: 1.0; 
+                        color: mainSaveMa.pressed ? Qt.darker(root.mauve, 1.2) : (mainSaveMa.containsMouse ? root.mauve : root.surface0) 
+                    }
+                }
 
                 RowLayout {
                     id: saveRow
@@ -939,15 +1134,15 @@ Item {
                         text: "󰆓"
                         font.family: "Iosevka Nerd Font"
                         font.pixelSize: root.s(18)
-                        color: mainSaveMa.containsMouse ? root.crust : root.mauve
+                        color: mainSaveMa.containsMouse ? root.base : root.mauve
                         Behavior on color { ColorAnimation { duration: 150 } }
                     }
                     Text {
                         text: "Apply"
-                        font.family: "JetBrains Mono"
+                        font.family: "Inter"
                         font.weight: Font.Bold
-                        font.pixelSize: root.s(13)
-                        color: mainSaveMa.containsMouse ? root.crust : root.text
+                        font.pixelSize: root.s(14)
+                        color: mainSaveMa.containsMouse ? root.base : root.text
                         Behavior on color { ColorAnimation { duration: 150 } }
                     }
                 }
@@ -959,7 +1154,6 @@ Item {
                     cursorShape: Qt.PointingHandCursor
                     onClicked: root.saveAppSettings() 
                 }
-            }
-        }
+            }        }
     }
 }
