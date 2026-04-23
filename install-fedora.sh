@@ -3,15 +3,48 @@
 # ==============================================================================
 # Script Versioning & Initialization
 # ==============================================================================
-DOTS_VERSION="1.5.3"
+DOTS_VERSION="1.6.0"
 VERSION_FILE="$HOME/.local/state/imperative-dots-version"
+
+# ==============================================================================
+# Terminal UI Colors & Formatting
+# ==============================================================================
+RESET="\e[0m"
+BOLD="\e[1m"
+DIM="\e[2m"
+C_BLUE="\e[34m"
+C_CYAN="\e[36m"
+C_GREEN="\e[32m"
+C_YELLOW="\e[33m"
+C_RED="\e[31m"
+C_MAGENTA="\e[35m"
+
+# ==============================================================================
+# Early Distro Detection (Strictly isolated to prevent state bypasses)
+# ==============================================================================
+if [ -f /etc/os-release ]; then
+    # Use awk to strictly extract the ID without sourcing the file.
+    DETECTED_OS=$(awk -F= '/^ID=/{gsub(/"/, "", $2); print $2}' /etc/os-release)
+else
+    echo -e "${C_RED}Cannot detect OS. /etc/os-release not found.${RESET}"
+    exit 1
+fi
+
+case "$DETECTED_OS" in
+    fedora|rhel|centos|almalinux|rocky)
+        OS="$DETECTED_OS"
+        ;;
+    *)
+        echo -e "${C_RED}Unsupported OS ($DETECTED_OS). This script strictly supports Fedora and RHEL derivatives.${RESET}"
+        exit 1
+        ;;
+esac
 
 # Prevent the TTY/Console from falling asleep (black screen) during long package builds
 setterm -blank 0 -powerdown 0 2>/dev/null || true
 printf '\033[9;0]' 2>/dev/null || true
 
 # Global Variables & Initial States (Defaults)
-# Read from user-dirs.dirs first (most reliable), then xdg-user-dir, then hardcoded fallback
 USER_PICTURES_DIR=""
 
 if [ -f "$HOME/.config/user-dirs.dirs" ]; then
@@ -121,19 +154,6 @@ if [ -z "$TELEMETRY_ID" ]; then
 fi
 
 # ==============================================================================
-# Terminal UI Colors & Formatting
-# ==============================================================================
-RESET="\e[0m"
-BOLD="\e[1m"
-DIM="\e[2m"
-C_BLUE="\e[34m"
-C_CYAN="\e[36m"
-C_GREEN="\e[32m"
-C_YELLOW="\e[33m"
-C_RED="\e[31m"
-C_MAGENTA="\e[35m"
-
-# ==============================================================================
 # Package Arrays
 # ==============================================================================
 FEDORA_PKGS=(
@@ -147,7 +167,7 @@ FEDORA_PKGS=(
     "ImageMagick" "wget" "file" "git" "psmisc"
     "ffmpeg" "fastfetch" "unzip" "python3-websockets" "qt6-qtwebsockets"
     "grim" "playerctl" "yq" "xdg-desktop-portal-gtk" "slurp" "mpv"
-    "wmctrl" "power-profiles-daemon" "easyeffects" "nautilus" "lsp-plugins-lv2"
+    "wmctrl" "power-profiles-daemon" "easyeffects" "nautilus" "lsp-plugins-lv2" "hyprpolkitagent"
     "qt5-qtwayland" "qt5-qtquickcontrols" "qt5-qtquickcontrols2" "qt5-qtgraphicaleffects" "qt6-qtwayland"
     "qt5ct" "qt6ct" "adw-gtk3-theme"
 )
@@ -166,60 +186,44 @@ FEDORA_EXTRA_PKGS_INFO=(
 )
 
 # ==============================================================================
-# Early Distro Detection & TUI Dependency Bootstrap
+# Early Dependency Bootstrap
 # ==============================================================================
-if [ -f /etc/os-release ]; then
-    . /etc/os-release
-    OS=$ID
-else
-    echo -e "${C_RED}Cannot detect OS. /etc/os-release not found.${RESET}"
-    exit 1
+PKGS=("${FEDORA_PKGS[@]}")
+DISTRO_FAMILY="fedora"
+
+# 1. Bootstrap TUI dependencies
+if ! command -v fzf &> /dev/null || ! command -v lspci &> /dev/null || ! command -v jq &> /dev/null || ! command -v curl &> /dev/null; then
+    echo -e "${C_CYAN}Bootstrapping TUI dependencies (fzf, pciutils, jq, curl)...${RESET}"
+    sudo dnf install -y fzf pciutils jq curl > /dev/null 2>&1
 fi
 
-case $OS in
-    fedora|rhel|centos|almalinux|rocky)
-        PKGS=("${FEDORA_PKGS[@]}")
-        DISTRO_FAMILY="fedora"
+# 2. Enable RPM Fusion (Free + NonFree)
+if ! rpm -q rpmfusion-free-release &>/dev/null; then
+    echo -e "${C_CYAN}Enabling RPM Fusion Free repository...${RESET}"
+    sudo dnf install -y \
+        "https://mirrors.rpmfusion.org/free/fedora/rpmfusion-free-release-$(rpm -E %fedora).noarch.rpm" \
+        > /dev/null 2>&1
+fi
+if ! rpm -q rpmfusion-nonfree-release &>/dev/null; then
+    echo -e "${C_CYAN}Enabling RPM Fusion NonFree repository...${RESET}"
+    sudo dnf install -y \
+        "https://mirrors.rpmfusion.org/nonfree/fedora/rpmfusion-nonfree-release-$(rpm -E %fedora).noarch.rpm" \
+        > /dev/null 2>&1
+fi
 
-        # 1. Bootstrap TUI dependencies
-        if ! command -v fzf &> /dev/null || ! command -v lspci &> /dev/null || ! command -v jq &> /dev/null || ! command -v curl &> /dev/null; then
-            echo -e "${C_CYAN}Bootstrapping TUI dependencies (fzf, pciutils, jq, curl)...${RESET}"
-            sudo dnf install -y fzf pciutils jq curl > /dev/null 2>&1
-        fi
+# 3. Enable COPR hyprland repo
+if ! dnf copr list --enabled 2>/dev/null | grep -q "solopasha/hyprland"; then
+    echo -e "${C_CYAN}Enabling COPR solopasha/hyprland...${RESET}"
+    sudo dnf copr enable -y solopasha/hyprland > /dev/null 2>&1
+fi
 
-        # 2. Enable RPM Fusion (Free + NonFree)
-        if ! rpm -q rpmfusion-free-release &>/dev/null; then
-            echo -e "${C_CYAN}Enabling RPM Fusion Free repository...${RESET}"
-            sudo dnf install -y \
-                "https://mirrors.rpmfusion.org/free/fedora/rpmfusion-free-release-$(rpm -E %fedora).noarch.rpm" \
-                > /dev/null 2>&1
-        fi
-        if ! rpm -q rpmfusion-nonfree-release &>/dev/null; then
-            echo -e "${C_CYAN}Enabling RPM Fusion NonFree repository...${RESET}"
-            sudo dnf install -y \
-                "https://mirrors.rpmfusion.org/nonfree/fedora/rpmfusion-nonfree-release-$(rpm -E %fedora).noarch.rpm" \
-                > /dev/null 2>&1
-        fi
+# 4. Ensure Rust/Cargo is available (needed for extra packages)
+if ! command -v cargo &> /dev/null; then
+    echo -e "${C_CYAN}Installing Rust/Cargo (needed for extra packages)...${RESET}"
+    sudo dnf install -y cargo rust > /dev/null 2>&1
+fi
 
-        # 3. Enable COPR hyprland repo
-        if ! dnf copr list --enabled 2>/dev/null | grep -q "solopasha/hyprland"; then
-            echo -e "${C_CYAN}Enabling COPR solopasha/hyprland...${RESET}"
-            sudo dnf copr enable -y solopasha/hyprland > /dev/null 2>&1
-        fi
-
-        # 4. Ensure Rust/Cargo is available (needed for extra packages)
-        if ! command -v cargo &> /dev/null; then
-            echo -e "${C_CYAN}Installing Rust/Cargo (needed for extra packages)...${RESET}"
-            sudo dnf install -y cargo rust > /dev/null 2>&1
-        fi
-
-        PKG_MANAGER="sudo dnf install -y"
-        ;;
-    *)
-        echo -e "${C_RED}Unsupported OS ($OS). This script strictly supports Fedora/RHEL derivatives.${RESET}"
-        exit 1
-        ;;
-esac
+PKG_MANAGER="sudo dnf install -y"
 
 # Helper: check if an RPM package is installed
 is_pkg_installed() {
@@ -353,7 +357,7 @@ send_telemetry "init"
 # ==============================================================================
 
 draw_header() {
-    printf "\033[H"
+    clear 
     printf "${BOLD}${C_CYAN}"
     cat << "EOF"
  ██╗██╗     ██╗   ██╗ █████╗ ███╗   ███╗██╗██████╗  ██████╗ 
@@ -385,7 +389,6 @@ EOF
     printf "\033[K${BOLD} Server Version: ${RESET} %s\n" "$DOTS_VERSION"
     printf "\033[K${BOLD} Local Version:  ${RESET} %s\n" "$LOCAL_VERSION"
     printf "\033[K${C_BLUE} =================================================================${RESET}\n\n"
-    printf "\033[J"
 }
 
 manage_packages() {
@@ -690,7 +693,6 @@ manage_keyboard() {
 }
 
 show_overview() {
-    clear
     draw_header
     echo -e "${BOLD}${C_MAGENTA}=== System Overview & Keybinds ===${RESET}\n"
     echo -e "This configuration is an adaptation of the ${BOLD}${C_CYAN}ilyamiro/nixos-configuration${RESET} setup."
@@ -914,7 +916,7 @@ prompt_optional_features_menu() {
     fi
 
     while true; do
-        clear
+        draw_header
         echo -e "${BOLD}${C_CYAN}=== Optional Component Setup ===${RESET}\n"
         
         local S_SDDM=$( [ "$OPT_SDDM" = true ] && echo -e "${C_GREEN}[x]${RESET}" || echo -e "${DIM}[ ]${RESET}" )
@@ -979,7 +981,6 @@ prompt_optional_features_menu() {
 # ==============================================================================
 # Main Menu Loop
 # ==============================================================================
-clear
 
 while true; do
     draw_header
@@ -1064,8 +1065,6 @@ sudo -v
 # --- 0. Resolve Package Conflicts (Fedora/DNF) ---
 echo -e "\n${C_CYAN}[ INFO ]${RESET} Resolving potential package conflicts..."
 
-# On Fedora, PipeWire-Jack is provided via pipewire-jack-audio-connection-kit.
-# Remove any legacy standalone jack packages that might conflict.
 for jack_pkg in jack-audio-connection-kit jack2; do
     if rpm -q "$jack_pkg" &>/dev/null; then
         echo -e "  -> Removing conflicting package '$jack_pkg'..."
@@ -1073,10 +1072,8 @@ for jack_pkg in jack-audio-connection-kit jack2; do
     fi
 done
 
-# Pre-install pipewire-jack before the main loop
 sudo dnf install -y pipewire-jack-audio-connection-kit > /dev/null 2>&1 || true
 
-# Remove conflicting packages that have Fedora-specific equivalents
 CONFLICTING_PKGS=("swayosd" "quickshell" "matugen" "go-yq")
 for cpkg in "${CONFLICTING_PKGS[@]}"; do
     if rpm -q "$cpkg" &>/dev/null; then
@@ -1095,7 +1092,6 @@ echo -e "\n${C_CYAN}[ INFO ]${RESET} Checking for already installed packages..."
 for pkg in "${ALL_PKGS[@]}"; do
     [[ -z "$pkg" ]] && continue
 
-    # Use rpm -q for Fedora package check
     if rpm -q "$pkg" &>/dev/null; then
         true # Already installed, skip
     else
@@ -1156,7 +1152,6 @@ install_cargo_pkg "cliphist" "cliphist"
 install_cargo_pkg "satty" "satty"
 install_cargo_pkg "matugen" "matugen"
 
-# Install swww (aliased as awww via wrapper)
 if ! command -v swww &>/dev/null; then
     echo -e "  -> Installing swww (used as awww) via cargo..."
     if cargo install swww 2>/dev/null; then
@@ -1167,7 +1162,6 @@ if ! command -v swww &>/dev/null; then
     fi
 fi
 
-# Inform user about manually built packages
 echo -e "\n${C_YELLOW}[ INFO ]${RESET} The following packages require manual installation on Fedora:"
 for info in "${FEDORA_EXTRA_PKGS_INFO[@]}"; do
     echo -e "  ${DIM}${info}${RESET}"
@@ -1180,11 +1174,9 @@ if [ "$HAS_NVIDIA_PROPRIETARY" = true ]; then
     echo -e "  -> Injecting kernel parameters via modprobe (nvidia-drm.modeset=1 nvidia-drm.fbdev=1)..."
     echo -e "options nvidia-drm modeset=1 fbdev=1" | sudo tee /etc/modprobe.d/nvidia.conf > /dev/null
 
-    # On Fedora, akmods builds and signs the module automatically; wait for it to complete
     echo -e "  -> Waiting for akmod-nvidia to build kernel module (this may take a few minutes)..."
     sudo akmods --force > /dev/null 2>&1 || true
 
-    # Fedora uses dracut for initramfs
     if command -v dracut &> /dev/null; then
         echo -e "  -> Rebuilding initramfs (dracut)..."
         sudo dracut --force > /dev/null 2>&1
@@ -1356,9 +1348,6 @@ if [ "$DO_FULL_INSTALL" = true ]; then
         fi
     done
     
-    # Safely restore settings.json if it existed prior to the copy loop.
-    # This preserves all user-customized fields (uiScale, openGuideAtStartup, etc.)
-    # while the adaptability phase below will overwrite only the fields we control.
     if [ -f "$BACKUP_DIR/settings.json.bak" ]; then
         mkdir -p "$(dirname "$SETTINGS_FILE")"
         cp "$BACKUP_DIR/settings.json.bak" "$SETTINGS_FILE"
@@ -1367,46 +1356,75 @@ if [ "$DO_FULL_INSTALL" = true ]; then
 else
     # Partial Update Logic (Git Diff)
     CHANGED_FILES=""
+    DELETED_FILES=""
+    
     if [ "$OLD_COMMIT" != "$NEW_COMMIT" ]; then
         CHANGED_FILES=$(git -C "$REPO_DIR" diff --name-only --diff-filter=AM "$OLD_COMMIT" "$NEW_COMMIT" | grep "^\.config/")
+        DELETED_FILES=$(git -C "$REPO_DIR" diff --name-only --diff-filter=D "$OLD_COMMIT" "$NEW_COMMIT" | grep "^\.config/")
     fi
 
-    if [ -n "$CHANGED_FILES" ]; then
+    if [ -n "$CHANGED_FILES" ] || [ -n "$DELETED_FILES" ]; then
         echo -e "  -> Performing ${C_GREEN}Partial Update${RESET} based on upstream changes..."
-        echo "$CHANGED_FILES" | while IFS= read -r file; do
-            FOLDER_NAME=$(echo "$file" | cut -d'/' -f2)
+        
+        if [ -n "$DELETED_FILES" ]; then
+            echo "$DELETED_FILES" | while IFS= read -r file; do
+                FOLDER_NAME=$(echo "$file" | cut -d'/' -f2)
+                
+                valid_folder=false
+                for f in "${CONFIG_FOLDERS[@]}"; do
+                    if [ "$f" == "$FOLDER_NAME" ]; then
+                        valid_folder=true
+                        break
+                    fi
+                done
 
-            valid_folder=false
-            for f in "${CONFIG_FOLDERS[@]}"; do
-                if [ "$f" == "$FOLDER_NAME" ]; then
-                    valid_folder=true
-                    break
+                if [ "$valid_folder" = true ]; then
+                    TARGET_FILE="$HOME/$file"
+                    REL_PATH="${file#\.config/}"
+                    
+                    if [ -f "$TARGET_FILE" ]; then
+                        mkdir -p "$(dirname "$BACKUP_DIR/$REL_PATH")"
+                        cp "$TARGET_FILE" "$BACKUP_DIR/$REL_PATH"
+                        rm -f "$TARGET_FILE"
+                        echo "    -> Removed obsolete file: $file"
+                    fi
                 fi
             done
+        fi
 
-            if [ "$valid_folder" = true ]; then
-                SOURCE_FILE="$REPO_DIR/$file"
-                TARGET_FILE="$HOME/$file"
-                REL_PATH="${file#\.config/}"
+        if [ -n "$CHANGED_FILES" ]; then
+            echo "$CHANGED_FILES" | while IFS= read -r file; do
+                FOLDER_NAME=$(echo "$file" | cut -d'/' -f2)
 
-                # Never overwrite settings.json from upstream during a partial update —
-                # the adaptability phase at the end of the script is the sole writer for
-                # the fields it manages, and all other fields belong to the user.
-                if [[ "$file" == *"settings.json" ]]; then
-                    echo "    -> Skipped (user-owned): $file"
-                    continue
+                valid_folder=false
+                for f in "${CONFIG_FOLDERS[@]}"; do
+                    if [ "$f" == "$FOLDER_NAME" ]; then
+                        valid_folder=true
+                        break
+                    fi
+                done
+
+                if [ "$valid_folder" = true ]; then
+                    SOURCE_FILE="$REPO_DIR/$file"
+                    TARGET_FILE="$HOME/$file"
+                    REL_PATH="${file#\.config/}"
+
+                    if [[ "$file" == *"settings.json" ]]; then
+                        echo "    -> Skipped (user-owned): $file"
+                        continue
+                    fi
+
+                    if [ -f "$TARGET_FILE" ]; then
+                        mkdir -p "$(dirname "$BACKUP_DIR/$REL_PATH")"
+                        cp "$TARGET_FILE" "$BACKUP_DIR/$REL_PATH"
+                    fi
+
+                    mkdir -p "$(dirname "$TARGET_FILE")"
+                    cp "$SOURCE_FILE" "$TARGET_FILE"
+                    echo "    -> Updated: $file"
                 fi
-
-                if [ -f "$TARGET_FILE" ]; then
-                    mkdir -p "$(dirname "$BACKUP_DIR/$REL_PATH")"
-                    cp "$TARGET_FILE" "$BACKUP_DIR/$REL_PATH"
-                fi
-
-                mkdir -p "$(dirname "$TARGET_FILE")"
-                cp "$SOURCE_FILE" "$TARGET_FILE"
-                echo "    -> Updated: $file"
-            fi
-        done
+            done
+        fi
         printf "  -> Partial update complete %-21s ${C_GREEN}[ OK ]${RESET}\n" ""
     else
         echo "  -> No target config files were changed upstream. Local files kept intact."
@@ -1455,25 +1473,15 @@ if [ -f "$REPO_DIR/utils/bin/cava" ]; then
     printf "  -> Deployed Cava wrapper %-17s ${C_GREEN}[ OK ]${RESET}\n" ""
 fi
 
-# Deploy awww wrapper pointing to swww binary
-if command -v swww &>/dev/null && [ ! -f "$HOME/.local/bin/awww" ]; then
-    cat <<'AWWW_EOF' > "$HOME/.local/bin/awww"
-#!/usr/bin/env bash
-exec swww "$@"
-AWWW_EOF
-    chmod +x "$HOME/.local/bin/awww"
-    printf "  -> Deployed awww -> swww wrapper %-10s ${C_GREEN}[ OK ]${RESET}\n" ""
-fi
-
 # Enable Pipewire natively for the user environment
 sudo systemctl --global enable pipewire wireplumber pipewire-pulse 2>/dev/null || true
 systemctl --user start pipewire wireplumber pipewire-pulse 2>/dev/null || true
 
-# Enable SwayOSD libinput backend
+# --- Enable SwayOSD libinput backend ---
 sudo systemctl enable --now swayosd-libinput-backend.service 2>/dev/null || true
 printf "  -> SwayOSD libinput backend enabled %-14s ${C_GREEN}[ OK ]${RESET}\n" ""
 
-# Enable EasyEffects as a user service
+# --- Enable EasyEffects as a user service ---
 mkdir -p "$HOME/.config/systemd/user"
 cat <<EOF > "$HOME/.config/systemd/user/easyeffects.service"
 [Unit]
@@ -1602,7 +1610,7 @@ fi
 
 if [ -f "$HYPR_CONF" ]; then
 
-    # Inject Keyboard Layout Configurations dynamically
+    # 0. Inject Keyboard Layout Configurations dynamically
     echo -e "  -> Applying Keyboard configuration to hyprland.conf..."
     sed -i -E "s/^[[:space:]]*kb_layout[[:space:]]*=.*/    kb_layout = $KB_LAYOUTS/" "$HYPR_CONF"
     
@@ -1617,10 +1625,8 @@ if [ -f "$HYPR_CONF" ]; then
     # ========================================================================
     echo -e "  -> Applying Environment Variables safely..."
 
-    # Clean up ANY previous injections using our marker block
     sed -i '/^# === DOTFILES AUTO-INJECTED ENV ===/,/^# === END DOTFILES ENV ===/d' "$HYPR_CONF"
 
-    # Also clean up legacy sed attempts
     sed -i '/env = WALLPAPER_DIR/d' "$HYPR_CONF"
     sed -i '/env = SCRIPT_DIR/d' "$HYPR_CONF"
     sed -i '/env = QT_QPA_PLATFORMTHEME/d' "$HYPR_CONF"
@@ -1656,7 +1662,6 @@ EOF
 
     echo "# === END DOTFILES ENV ===" >> "$HYPR_CONF"
 
-    # Restore cursor block if a previous bad script deleted it
     if ! grep -q "cursor {" "$HYPR_CONF"; then
         echo -e "  -> Restoring deleted cursor block..."
         cat <<EOF >> "$HYPR_CONF"
@@ -1671,44 +1676,90 @@ else
     echo -e "${C_RED}Warning: hyprland.conf not found at $HYPR_CONF${RESET}"
 fi
 
-# Sync settings.json: write only the fields the installer owns.
-# All other fields the user may have set (uiScale, openGuideAtStartup, etc.)
-# are preserved by jq's merging strategy.
+# -> Sync settings.json: write only the fields the installer owns.
 echo -e "  -> Syncing installer-owned fields to settings.json..."
+
+# 1. Parse keybindings.conf dynamically into a JSON array
+KEYBINDS_CONF="$TARGET_CONFIG_DIR/hypr/config/keybindings.conf"
+KEYBINDS_JSON="[]"
+
+if [ -f "$KEYBINDS_CONF" ]; then
+    echo -e "  -> Parsing $KEYBINDS_CONF into settings.json..."
+    KEYBINDS_JSON="["
+    
+    while IFS= read -r line || [ -n "$line" ]; do
+        [[ "$line" =~ ^[[:space:]]*#.*$ ]] && continue
+        [[ -z "${line// }" ]] && continue
+        [[ ! "$line" =~ ^[[:space:]]*bind ]] && continue
+
+        bind_type="${line%%=*}"
+        bind_type="${bind_type// /}"
+        rest="${line#*=}"
+
+        IFS=',' read -r mods key disp cmd <<< "$rest"
+
+        mods=$(echo "$mods" | xargs)
+        key=$(echo "$key" | xargs)
+        disp=$(echo "$disp" | xargs)
+        cmd=$(echo "$cmd" | xargs)
+
+        obj=$(jq -n \
+            --arg t "$bind_type" \
+            --arg m "$mods" \
+            --arg k "$key" \
+            --arg d "$disp" \
+            --arg c "$cmd" \
+            '{type: $t, mods: $m, key: $k, dispatcher: $d, command: $c}')
+
+        KEYBINDS_JSON="$KEYBINDS_JSON$obj,"
+    done < "$KEYBINDS_CONF"
+
+    if [ "$KEYBINDS_JSON" != "[" ]; then
+        KEYBINDS_JSON="${KEYBINDS_JSON%,}]"
+    else
+        KEYBINDS_JSON="[]"
+    fi
+else
+    echo -e "  -> \e[33mkeybindings.conf not found. Skipping keybind parsing.\e[0m"
+fi
+
+# 2. Inject the parsed array into settings.json
 if [ -f "$SETTINGS_FILE" ]; then
     tmp_json=$(mktemp)
     jq --arg langs "$KB_LAYOUTS" \
        --arg wpdir "$WALLPAPER_DIR" \
        --arg kbopt "$KB_OPTIONS" \
-       '.language = $langs | .wallpaperDir = $wpdir | .kbOptions = $kbopt' \
+       --argjson binds "$KEYBINDS_JSON" \
+       '.language = $langs | .wallpaperDir = $wpdir | .kbOptions = $kbopt | .keybinds = $binds' \
        "$SETTINGS_FILE" > "$tmp_json" && mv "$tmp_json" "$SETTINGS_FILE"
     printf "  -> settings.json updated (user fields preserved) %-3s ${C_GREEN}[ OK ]${RESET}\n" ""
 else
     mkdir -p "$(dirname "$SETTINGS_FILE")"
-    cat <<EOF > "$SETTINGS_FILE"
-{
-  "uiScale": 1.0,
-  "openGuideAtStartup": true,
-  "topbarHelpIcon": true,
-  "wallpaperDir": "$WALLPAPER_DIR",
-  "language": "$KB_LAYOUTS",
-  "kbOptions": "$KB_OPTIONS"
-}
-EOF
-    printf "  -> settings.json created with defaults %-13s ${C_GREEN}[ OK ]${RESET}\n" ""
+    jq -n \
+       --arg langs "$KB_LAYOUTS" \
+       --arg wpdir "$WALLPAPER_DIR" \
+       --arg kbopt "$KB_OPTIONS" \
+       --argjson binds "$KEYBINDS_JSON" \
+       '{
+         uiScale: 1.0,
+         openGuideAtStartup: true,
+         topbarHelpIcon: true,
+         wallpaperDir: $wpdir,
+         language: $langs,
+         kbOptions: $kbopt,
+         keybinds: $binds
+       }' > "$SETTINGS_FILE"
+    printf "  -> settings.json created with defaults and parsed keybinds %-13s ${C_GREEN}[ OK ]${RESET}\n" ""
 fi
 
-# Patch WallpaperPicker.qml dynamically (matugen 4.0 compatibility)
+# 4. Patch WallpaperPicker.qml dynamically
 if [ -f "$WP_QML" ]; then
-    # Remove any existing --source-color-index 0 to prevent duplicates
     sed -i 's/ \+--source-color-index 0//g' "$WP_QML"
-    # Inject it exactly once next to any matched matugen command
     sed -i 's/matugen image "[^"]*"/& --source-color-index 0/g' "$WP_QML"
 fi
 
-# Replace any remaining swww references with awww in scripts
 if [ -d "$TARGET_CONFIG_DIR/hypr/scripts" ]; then
-    find "$TARGET_CONFIG_DIR/hypr/scripts" -type f -exec sed -i 's/swww/awww/g' {} +
+    find "$TARGET_CONFIG_DIR/hypr/scripts" -type f -exec sed -i -e 's/swww-daemon/awww-daemon/g' -e 's/swww/awww/g' {} +
 fi
 
 # Zsh Dynamism
@@ -1841,11 +1892,11 @@ printf "  -> Configuration and version state saved %-7s ${C_GREEN}[ OK ]${RESET}
 # ==============================================================================
 echo -e "\n${BOLD}${C_GREEN}"
 cat << "EOF"
-  ___ _  _ ___ _____ _   _    _      _ _____ ___ ___  _  _    ___ ___  __  __ ___ _    ___ _____ ___ 
- |_ _| \| / __|_   _/_\ | |  | |    /_\_   _|_ _/ _ \| \| |  / __/ _ \ |  \/  | _ \ |  | __|_   _| __|
-  | || .` \__ \ | |/ _ \| |__| |__ / _ \| |  | | (_) | .` | | (_| (_) | |\/| |  _/ |__| _|  | | | _| 
- |___|_|\_|___/ |_/_/ \_\____|____/_/ \_\_| |___\___/|_|\_|  \___\___/|_|  |_|_| |____|___| |_| |___|
-                                                                                                     
+ ___ _  _ ___ _____ _   _    _      _ _____ ___ ___  _  _    ___ ___  __  __ ___ _    ___ _____ ___ 
+|_ _| \| / __|_   _/_\ | |  | |    /_\_   _|_ _/ _ \| \| |  / __/ _ \ | \/  | _ \ |  | __|_   _| __|
+ | || .` \__ \ | |/ _ \| |__| |__ / _ \| |  | | (_) | .` | | (_| (_) | |\/| |  _/ |__| _|  | | | _| 
+|___|_|\_|___/ |_/_/ \_\____|____/_/ \_\_| |___\___/|_|\_|  \___\___/|_|  |_|_| |____|___| |_| |___|
+                                                                                                    
 EOF
 echo -e "${RESET}\n"
 
@@ -1866,4 +1917,5 @@ fi
 echo -e "Old configurations backed up to: ${C_CYAN}$BACKUP_DIR${RESET}"
 echo -e "Please log out and log back in, or restart Hyprland to apply all changes."
 
+# Send completion telemetry
 send_telemetry "done"
