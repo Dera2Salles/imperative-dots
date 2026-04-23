@@ -1,4 +1,4 @@
-//@ pragma UseQApplication
+//@pragma UseQApplication
 import QtQuick
 import QtQuick.Layouts
 import QtQuick.Controls
@@ -8,107 +8,74 @@ import Quickshell.Wayland
 import Quickshell.Services.SystemTray
 import "monitors" as Monitors
 
-
 Variants {
     model: Quickshell.screens
 
     delegate: Component {
         PanelWindow {
-	    id: barWindow
+            id: barWindow
+            property bool pendingReload: false
 
-	    property bool pendingReload: false
-
-	    IpcHandler {
-    		target: "topbar"
-    
-    		function forceReload() {
-            	    Quickshell.reload(true) 
-	        }
-
-	        function queueReload() {
-                    // If it's already closed, reload immediately. Otherwise, flag it.
-                    if (!barWindow.isSettingsOpen && barWindow.sidebarHoleWidth <= 0.01) {
+            IpcHandler {
+                target: "topbar"
+                function forceReload() {
+                    Quickshell.reload(true) 
+                }
+                function queueReload() {
+                    if (!barWindow.isSettingsOpen) {
                         Quickshell.reload(true)
                     } else {
                         barWindow.pendingReload = true
                     }
                 }
-	    }
+            }
 
             required property var modelData
-            
-            // Bind this specific bar instance to the dynamically assigned screen
             screen: modelData
-            
+
             anchors {
                 top: true
                 left: true
                 right: true
             }
-            
-            // --- Responsive Scaling Logic ---
+
             Scaler {
                 id: scaler
                 currentWidth: barWindow.width
             }
 
             property real baseScale: scaler.baseScale
-            
-            // Helper function mapped to the external scaler
+
             function s(val) { 
                 return scaler.s(val); 
             }
 
             property int barHeight: s(48)
 
-            // THICKER BAR, MINIMAL MARGINS (Scaled)
             height: barHeight
             margins { top: s(8); bottom: 0; left: s(4); right: s(4) }
-            
-            // exclusiveZone = height + top margin
             exclusiveZone: barHeight + s(4)
             color: "transparent"
 
-            // Dynamic Matugen Palette
             MatugenColors {
                 id: mocha
             }
 
-            // --- State Variables ---
             property bool showHelpIcon: true
-            property bool isRecording: false // Track screen recording
-            property bool updateAvailable: false // Track pending updates
+            property bool isRecording: false
+            property bool updateAvailable: false
             property int workspaceCount: 8
             
-            // Tracks current qs widget to coordinate the sidebar transitions
             property string activeWidget: "" 
             property bool isSettingsOpen: activeWidget === "settings"
 
-            // --- Dynamic Window Mask ---
-            // Cuts a physical hole in the TopBar window so the Sidebar can occupy the top-left edge
-            property real targetSidebarHoleWidth: isSettingsOpen ? s(420) : 0
-            property real sidebarHoleWidth: targetSidebarHoleWidth
-            Behavior on sidebarHoleWidth { NumberAnimation { duration: 600; easing.type: Easing.OutExpo } }
-	    
-	    onSidebarHoleWidthChanged: {
-                if (barWindow.sidebarHoleWidth <= 0.01 && barWindow.pendingReload) {
+            onIsSettingsOpenChanged: {
+                if (!barWindow.isSettingsOpen && barWindow.pendingReload) {
                     barWindow.pendingReload = false;
                     Quickshell.reload(true);
                 }
-	    }
-
-
-            mask: Region { item: sidebarHole; intersection: Intersection.Xor }
-            
-            Item {
-                id: sidebarHole
-                anchors.top: parent.top
-                anchors.bottom: parent.bottom
-                anchors.left: parent.left
-                width: barWindow.sidebarHoleWidth
             }
 
-            // Background poller for active widget state tracking
             Process {
                 id: widgetPoller
                 command: ["bash", "-c", "cat /tmp/qs_current_widget 2>/dev/null || echo ''"]
@@ -133,7 +100,6 @@ Variants {
                 }
             }
             
-            // Background poller to check if gpu-screen-recorder is active via its PID file
             Process {
                 id: recPoller
                 command: ["bash", "-c", "if [ -s ~/.cache/qs_recording_state/rec_pid ] && kill -0 $(cat ~/.cache/qs_recording_state/rec_pid) 2>/dev/null; then echo '1'; else echo '0'; fi"]
@@ -152,7 +118,6 @@ Variants {
                 }
             }
 
-            // Background poller to check for pending updates
             Process {
                 id: updatePoller
                 command: ["bash", "-c", "if [ -f ~/.cache/qs_update_pending ]; then echo '1'; else echo '0'; fi"]
@@ -185,7 +150,6 @@ Variants {
                                     barWindow.showHelpIcon = parsed.topbarHelpIcon;
                                 }
                                 
-                                // Detect if workspace count changed and restart the bash script
                                 if (parsed.workspaceCount !== undefined && barWindow.workspaceCount !== parsed.workspaceCount) {
                                     barWindow.workspaceCount = parsed.workspaceCount;
                                     wsDaemon.running = false;
@@ -196,7 +160,7 @@ Variants {
                     }
                 }
             }
-            // EVENT-DRIVEN WATCHER FOR SETTINGS
+
             Process {
                 id: settingsWatcher
                 command: ["bash", "-c", "while [ ! -f ~/.config/hypr/settings.json ]; do sleep 1; done; inotifywait -qq -e modify,close_write ~/.config/hypr/settings.json"]
@@ -212,7 +176,6 @@ Variants {
                 }
             }
             
-            // Desktop Chassis Detection
             property bool isDesktop: false
             property string ethStatus: "Ethernet"
 
@@ -227,19 +190,14 @@ Variants {
                 }
             }
 
-            // Triggers layout animations immediately to feel fast
             property bool isStartupReady: false
             Timer { interval: 10; running: true; onTriggered: barWindow.isStartupReady = true }
             
-            // Prevents repeaters (Workspaces/Tray) from flickering on data updates
             property bool startupCascadeFinished: false
             Timer { interval: 1000; running: true; onTriggered: barWindow.startupCascadeFinished = true }
             
-            // Data gating to prevent startup layout jumping
             property bool fastPollerLoaded: false
-            
             property bool isDataReady: fastPollerLoaded
-            // Failsafe: Force the layout to show after 600ms even if fast poller hangs
             Timer { interval: 600; running: true; onTriggered: barWindow.isDataReady = true }
             
             property string timeStr: ""
@@ -269,11 +227,25 @@ Variants {
             
             property string kbLayout: "us"
             
-            ListModel { id: workspacesModel }
+            ListModel { 
+                id: workspacesModel 
+                property int activeIndex: 0
+            }
             
             property var musicData: { "status": "Stopped", "title": "", "artUrl": "", "timeStr": "" }
 
-            // Derived properties for UI logic
+            property string displayTitle: ""
+            property string displayTime: ""
+            property string displayArtUrl: ""
+
+            onMusicDataChanged: {
+                if (musicData && musicData.status !== "Stopped" && musicData.title !== "") {
+                    displayTitle = musicData.title;
+                    displayTime = musicData.timeStr;
+                    displayArtUrl = musicData.artUrl;
+                }
+            }
+
             property bool isMediaActive: barWindow.musicData.status !== "Stopped" && barWindow.musicData.title !== ""
             property bool isWifiOn: barWindow.wifiStatus.toLowerCase() === "enabled" || barWindow.wifiStatus.toLowerCase() === "on"
             property bool isBtOn: barWindow.btStatus.toLowerCase() === "enabled" || barWindow.btStatus.toLowerCase() === "on"
@@ -289,11 +261,6 @@ Variants {
                 return mocha.text; 
             }
 
-            // ==========================================
-            // DATA FETCHING 
-            // ==========================================
-
-            // Workspaces --------------------------------
             Process {
                 id: wsDaemon
                 command: ["bash", "-c", "~/.config/hypr/scripts/quickshell/workspaces.sh"]
@@ -310,25 +277,31 @@ Variants {
                             try { 
                                 let newData = JSON.parse(txt);
                                 
-                                // 1. Add missing items if the user increased the workspace count
                                 while (workspacesModel.count < newData.length) {
                                     workspacesModel.append({ "wsId": "", "wsState": "" });
                                 }
                                 
-                                // 2. Remove excess items if the user decreased the workspace count
                                 while (workspacesModel.count > newData.length) {
                                     workspacesModel.remove(workspacesModel.count - 1);
                                 }
                                 
-                                // 3. Update all properties smoothly without breaking bindings
+                                let newActive = -1;
+
                                 for (let i = 0; i < newData.length; i++) {
+                                    if (newData[i].state === "active") newActive = i;
+
                                     if (workspacesModel.get(i).wsState !== newData[i].state) {
                                         workspacesModel.setProperty(i, "wsState", newData[i].state);
                                     }
                                     if (workspacesModel.get(i).wsId !== newData[i].id.toString()) {
                                         workspacesModel.setProperty(i, "wsId", newData[i].id.toString());
                                     }
-                    }
+                                }
+
+                                if (newActive !== -1 && workspacesModel.activeIndex !== newActive) {
+                                    workspacesModel.activeIndex = newActive;
+                                }
+
                             } catch(e) {}
                         }
                     }
@@ -347,7 +320,6 @@ Variants {
                 }
             }
 
-            // Music -------------------------------------
             Process {
                 id: musicForceRefresh
                 running: true
@@ -422,11 +394,6 @@ Variants {
                 }
             }
 
-            // ==========================================
-            // MODULAR SYSTEM WATCHERS
-            // ==========================================
-
-            // --- KEYBOARD ---
             Process {
                 id: kbPoller; running: true
                 command: ["bash", "-c", "~/.config/hypr/scripts/quickshell/watchers/kb_fetch.sh"]
@@ -436,13 +403,12 @@ Variants {
                         if (txt !== "" && barWindow.kbLayout !== txt) barWindow.kbLayout = txt;
                         kbWaiter.running = false;
                         kbWaiter.running = true;
-                        barWindow.fastPollerLoaded = true; // Gating flag
+                        barWindow.fastPollerLoaded = true; 
                     }
                 }
             }
             Process { id: kbWaiter; command: ["bash", "-c", "~/.config/hypr/scripts/quickshell/watchers/kb_wait.sh"]; onExited: { kbPoller.running = false; kbPoller.running = true; } }
 
-            // --- AUDIO ---
             Process {
                 id: audioPoller; running: true
                 command: ["bash", "-c", "~/.config/hypr/scripts/quickshell/watchers/audio_fetch.sh"]
@@ -466,7 +432,6 @@ Variants {
             }
             Process { id: audioWaiter; command: ["bash", "-c", "~/.config/hypr/scripts/quickshell/watchers/audio_wait.sh"]; onExited: { audioPoller.running = false; audioPoller.running = true; } }
 
-            // --- NETWORK ---
             Process {
                 id: networkPoller; running: true
                 command: ["bash", "-c", "~/.config/hypr/scripts/quickshell/watchers/network_fetch.sh"]
@@ -487,9 +452,8 @@ Variants {
                     }
                 }
             }
-        Process { id: networkWaiter; command: ["bash", "-c", "~/.config/hypr/scripts/quickshell/watchers/network_wait.sh"]; onExited: { networkPoller.running = false; networkPoller.running = true; } }
+            Process { id: networkWaiter; command: ["bash", "-c", "~/.config/hypr/scripts/quickshell/watchers/network_wait.sh"]; onExited: { networkPoller.running = false; networkPoller.running = true; } }
 
-            // --- BLUETOOTH ---
             Process {
                 id: btPoller; running: true
                 command: ["bash", "-c", "~/.config/hypr/scripts/quickshell/watchers/bt_fetch.sh"]
@@ -511,7 +475,6 @@ Variants {
             }
             Process { id: btWaiter; command: ["bash", "-c", "~/.config/hypr/scripts/quickshell/watchers/bt_wait.sh"]; onExited: { btPoller.running = false; btPoller.running = true; } }
 
-            // --- BATTERY ---
             Process {
                 id: batteryPoller; running: true
                 command: ["bash", "-c", "~/.config/hypr/scripts/quickshell/watchers/battery_fetch.sh"]
@@ -556,12 +519,11 @@ Variants {
             Timer { interval: 150000; running: true; repeat: true; triggeredOnStart: true; onTriggered: { weatherPoller.running = false; weatherPoller.running = true; } }
 
 
-            // Native Qt Time Formatting
             Timer {
                 interval: 1000; running: true; repeat: true; triggeredOnStart: true
                 onTriggered: {
                     let d = new Date();
-                    barWindow.timeStr = Qt.formatDateTime(d, "hh:mm:ss AP");
+                    barWindow.timeStr = Qt.formatDateTime(d, "HH:mm:ss");
                     barWindow.fullDateStr = Qt.formatDateTime(d, "dddd, MMMM dd");
                     if (barWindow.typeInIndex >= barWindow.fullDateStr.length) {
                         barWindow.typeInIndex = barWindow.fullDateStr.length;
@@ -569,7 +531,6 @@ Variants {
                 }
             }
 
-            // Typewriter effect timer for the date
             Timer {
                 id: typewriterTimer
                 interval: 40
@@ -578,19 +539,14 @@ Variants {
                 onTriggered: barWindow.typeInIndex += 1
             }
 
-            // ==========================================
-            // UI LAYOUT
-            // ==========================================
             Item {
                 anchors.fill: parent
 
-                // ---------------- LEFT CONTENT ----------------
                 Rectangle {
                     id: leftContent
                     y: (parent.height - barWindow.barHeight) / 2
                     height: barWindow.barHeight
 
-                    // Base unified styling (matches the right system pills)
                     color: Qt.rgba(mocha.base.r, mocha.base.g, mocha.base.b, 0.75)
                     radius: barWindow.s(14)
                     border.width: 1
@@ -599,7 +555,6 @@ Variants {
                     
                     property bool showLayout: false
                     
-                    // Slide to the left seamlessly, fade out, and disable clicks so the settings panel underneath can be interacted with.
                     opacity: (showLayout && !barWindow.isSettingsOpen) ? 1 : 0
                     enabled: !barWindow.isSettingsOpen
                     
@@ -614,8 +569,7 @@ Variants {
                         onTriggered: leftContent.showLayout = true
                     }
 
-                    // Smooth dynamic width calculation based on inner layout
-                    property real targetWidth: leftLayout.width + barWindow.s(16) // 8px horizontal padding on each side
+                    property real targetWidth: leftLayout.width + barWindow.s(16)
                     width: targetWidth
                     Behavior on width { NumberAnimation { duration: 400; easing.type: Easing.OutQuint } }
 
@@ -626,7 +580,6 @@ Variants {
                         
                         property int pillHeight: barWindow.s(34)
 
-                        // Help
                         Rectangle {
                             property bool isHovered: helpMouse.containsMouse
                             color: isHovered ? Qt.rgba(mocha.surface1.r, mocha.surface1.g, mocha.surface1.b, 0.6) : "transparent"
@@ -660,7 +613,6 @@ Variants {
                             }
                         }
 
-                        // Search 
                         Rectangle {
                             property bool isHovered: searchMouse.containsMouse
                             color: isHovered ? Qt.rgba(mocha.surface1.r, mocha.surface1.g, mocha.surface1.b, 0.6) : "transparent"
@@ -686,7 +638,6 @@ Variants {
                             }
                         }
 
-                        // Settings Button 
                         Rectangle {
                             property bool isHovered: settingsMouse.containsMouse
                             color: isHovered ? Qt.rgba(mocha.surface1.r, mocha.surface1.g, mocha.surface1.b, 0.6) : "transparent"
@@ -712,7 +663,6 @@ Variants {
                             }
                         }
 
-                        // Update Button
                         Rectangle {
                             id: updateButton
                             property bool isHovered: updateMouse.containsMouse
@@ -741,7 +691,7 @@ Variants {
                             
                             Text {
                                 anchors.centerIn: parent
-                                text: "󰚰" // package/update icon
+                                text: "󰚰"
                                 font.family: "Iosevka Nerd Font"; font.pixelSize: barWindow.s(22)
                                 color: parent.isHovered ? mocha.text : parent.pulseColor
                                 Behavior on color { ColorAnimation { duration: 200 } }
@@ -761,7 +711,7 @@ Variants {
                         }
                     }
                 }
-                // ---------------- WORKSPACES ----------------
+                
                 Rectangle {
                     id: workspacesBox
                     color: Qt.rgba(mocha.base.r, mocha.base.g, mocha.base.b, 0.75)
@@ -770,13 +720,11 @@ Variants {
                     y: (parent.height - barWindow.barHeight) / 2
                     clip: true
                     
-                    // Uses targetWidth instead of active width for layout chaining to prevent Behavior delay loops
                     property real targetWidth: workspacesModel.count > 0 ? wsLayout.implicitWidth + barWindow.s(20) : 0
                     
-                    // Left-to-Right train logic (Settings Closed)
-		    property real defaultX: leftContent.width + barWindow.s(4)
-		    property real settingsX: mediaBox.settingsX - targetWidth - (targetWidth > 0 ? barWindow.s(4) : 0)
-		                        
+                    property real defaultX: leftContent.width + barWindow.s(4)
+                    property real settingsX: mediaBox.settingsX - targetWidth - (targetWidth > 0 ? barWindow.s(4) : 0)
+                                        
                     property real targetX: barWindow.isSettingsOpen ? settingsX : defaultX
                     x: targetX
                     Behavior on x { 
@@ -792,6 +740,40 @@ Variants {
                     
                     Behavior on width { NumberAnimation { duration: 400; easing.type: Easing.OutQuint } }
                     Behavior on opacity { NumberAnimation { duration: 300 } }
+
+                    Rectangle {
+                        id: activeHighlight
+                        y: (workspacesBox.height - barWindow.s(32)) / 2
+                        height: barWindow.s(32)
+                        radius: barWindow.s(10)
+                        color: mocha.mauve
+                        z: 0
+
+                        property int prevIdx: 0
+                        property int curIdx: workspacesModel.activeIndex
+
+                        onCurIdxChanged: {
+                            if (curIdx > prevIdx) {
+                                rightAnim.duration = 200; leftAnim.duration = 350;
+                            } else if (curIdx < prevIdx) {
+                                leftAnim.duration = 200; rightAnim.duration = 350;
+                            }
+                            prevIdx = curIdx;
+                        }
+
+                        property real targetLeft: wsLayout.x + curIdx * barWindow.s(38)
+                        property real targetRight: targetLeft + barWindow.s(32)
+
+                        property real actualLeft: targetLeft
+                        property real actualRight: targetRight
+
+                        Behavior on actualLeft { NumberAnimation { id: leftAnim; duration: 250; easing.type: Easing.OutExpo } }
+                        Behavior on actualRight { NumberAnimation { id: rightAnim; duration: 250; easing.type: Easing.OutExpo } }
+
+                        x: actualLeft
+                        width: actualRight - actualLeft
+                        opacity: workspacesModel.count > 0 ? 1 : 0
+                    }
 
                     Row {
                         id: wsLayout
@@ -817,13 +799,7 @@ Variants {
                                 
                                 height: barWindow.s(32); radius: barWindow.s(10)
                                 
-                                color: stateLabel === "active" 
-                                        ? mocha.mauve 
-                                        : (isHovered 
-                                            ? Qt.rgba(mocha.overlay0.r, mocha.overlay0.g, mocha.overlay0.b, 0.9) 
-                                            : (stateLabel === "occupied" 
-                                                ? Qt.rgba(mocha.surface2.r, mocha.surface2.g, mocha.surface2.b, 0.9) 
-                                                : "transparent"))
+                                color: isHovered ? Qt.rgba(mocha.text.r, mocha.text.g, mocha.text.b, 0.1) : (stateLabel === "occupied" ? Qt.rgba(mocha.text.r, mocha.text.g, mocha.text.b, 0.15) : "transparent")
 
                                 scale: isHovered && stateLabel !== "active" ? 1.08 : 1.0
                                 Behavior on scale { NumberAnimation { duration: 250; easing.type: Easing.OutBack } }
@@ -861,11 +837,7 @@ Variants {
                                     font.pixelSize: barWindow.s(14)
                                     font.weight: stateLabel === "active" ? Font.Black : (stateLabel === "occupied" ? Font.Bold : Font.Medium)
                                     
-                                    color: stateLabel === "active" 
-                                            ? mocha.crust 
-                                            : (isHovered 
-                                                ? mocha.crust 
-                                                : (stateLabel === "occupied" ? mocha.text : mocha.overlay0))
+                                    color: index === workspacesModel.activeIndex ? mocha.crust : (isHovered ? mocha.text : (stateLabel === "occupied" ? mocha.text : mocha.overlay0))
                                     
                                     Behavior on color { ColorAnimation { duration: 250 } }
                                 }
@@ -880,7 +852,6 @@ Variants {
                     }
                 }
 
-                // ---------------- MEDIA PLAYER ----------------
                 Rectangle {
                     id: mediaBox
                     color: Qt.rgba(mocha.base.r, mocha.base.g, mocha.base.b, 0.75)
@@ -889,11 +860,13 @@ Variants {
                     height: barWindow.barHeight
                     clip: true 
                     
-                    property real targetWidth: barWindow.isMediaActive ? mediaLayoutContainer.width + barWindow.s(24) : 0
+                    property real activeMediaWidth: innerMediaLayout.implicitWidth
+                    Behavior on activeMediaWidth { NumberAnimation { duration: 400; easing.type: Easing.OutQuint } }
 
-                    // Left-to-Right train logic (Settings Closed)
-		    property real defaultX: workspacesBox.defaultX + workspacesBox.targetWidth + (workspacesBox.targetWidth > 0 ? barWindow.s(4) : 0)
-		    property real settingsX: centerBox.settingsX - targetWidth - (targetWidth > 0 ? barWindow.s(4) : 0)
+                    property real targetWidth: barWindow.isMediaActive ? activeMediaWidth + barWindow.s(24) : 0
+
+                    property real defaultX: workspacesBox.defaultX + workspacesBox.targetWidth + (workspacesBox.targetWidth > 0 ? barWindow.s(4) : 0)
+                    property real settingsX: centerBox.settingsX - targetWidth - (targetWidth > 0 ? barWindow.s(4) : 0)
 
                     property real targetX: barWindow.isSettingsOpen ? settingsX : defaultX
                     x: targetX
@@ -915,7 +888,7 @@ Variants {
                         anchors.left: parent.left
                         anchors.leftMargin: barWindow.s(12)
                         height: parent.height
-                        width: innerMediaLayout.width
+                        width: innerMediaLayout.implicitWidth
                         
                         opacity: barWindow.isMediaActive ? 1.0 : 0.0
                         transform: Translate { 
@@ -951,7 +924,7 @@ Variants {
                                         clip: true
                                         Image { 
                                             anchors.fill: parent; 
-                                            source: barWindow.musicData.artUrl || ""; 
+                                            source: barWindow.displayArtUrl || ""; 
                                             fillMode: Image.PreserveAspectCrop 
                                         }
                                         
@@ -967,7 +940,7 @@ Variants {
                                         width: maxColWidth 
                                         
                                         Text { 
-                                            text: barWindow.musicData.title; 
+                                            text: barWindow.displayTitle; 
                                             font.family: "JetBrains Mono"; 
                                             font.weight: Font.Black; 
                                             font.pixelSize: barWindow.s(13); 
@@ -976,7 +949,7 @@ Variants {
                                             elide: Text.ElideRight; 
                                         }
                                         Text { 
-                                            text: barWindow.musicData.timeStr; 
+                                            text: barWindow.displayTime; 
                                             font.family: "JetBrains Mono"; 
                                             font.weight: Font.Black; 
                                             font.pixelSize: barWindow.s(10); 
@@ -1032,7 +1005,6 @@ Variants {
                     }
                 }
 
-                // ---------------- CENTER BOX ----------------
                 Rectangle {
                     id: centerBox
                     property bool isHovered: centerMouse.containsMouse
@@ -1046,11 +1018,9 @@ Variants {
                     width: targetWidth
                     Behavior on width { NumberAnimation { duration: 400; easing.type: Easing.OutExpo } }
                     
-                    // Left-to-Right train logic (Settings Closed) - Takes absolute center if not overflowing
                     property real pureCenter: (parent.width - targetWidth) / 2
-                    // Change these two lines:
-		    property real minCenterDefaultX: mediaBox.defaultX + mediaBox.targetWidth + (mediaBox.targetWidth > 0 ? barWindow.s(4) : 0)
-		    property real settingsX: barWindow.width - rightContent.width - targetWidth - barWindow.s(4)
+                    property real minCenterDefaultX: mediaBox.defaultX + mediaBox.targetWidth + (mediaBox.targetWidth > 0 ? barWindow.s(4) : 0)
+                    property real settingsX: barWindow.width - rightContent.width - targetWidth - barWindow.s(4)
                     property real defaultX: Math.max(minCenterDefaultX, pureCenter)
                     
                     property real targetX: barWindow.isSettingsOpen ? settingsX : defaultX
@@ -1060,7 +1030,6 @@ Variants {
                         NumberAnimation { duration: 600; easing.type: Easing.OutExpo } 
                     }
                     
-                    // Staggered Center Transition (Vertical)
                     property bool showLayout: false
                     opacity: showLayout ? 1 : 0
                     transform: Translate {
@@ -1076,7 +1045,6 @@ Variants {
 
                     Behavior on opacity { NumberAnimation { duration: 600; easing.type: Easing.OutCubic } }
 
-                    // Hover Scaling
                     scale: isHovered ? 1.03 : 1.0
                     Behavior on scale { NumberAnimation { duration: 300; easing.type: Easing.OutExpo } }
                     Behavior on color { ColorAnimation { duration: 250 } }
@@ -1093,14 +1061,12 @@ Variants {
                         anchors.centerIn: parent
                         spacing: barWindow.s(24)
 
-                        // Clockbox
                         ColumnLayout {
                             spacing: -2
-                            Text { text: barWindow.timeStr; Layout.alignment: Qt.AlignHCenter; font.family: "JetBrains Mono"; font.pixelSize: barWindow.s(16); font.weight: Font.Black; color: mocha.blue }
-                            Text { text: barWindow.dateStr; Layout.alignment: Qt.AlignHCenter; font.family: "JetBrains Mono"; font.pixelSize: barWindow.s(11); font.weight: Font.Bold; color: mocha.subtext0 }
+                            Text { text: barWindow.timeStr; Layout.alignment: Qt.AlignLeft; font.family: "JetBrains Mono"; font.pixelSize: barWindow.s(16); font.weight: Font.Black; color: mocha.blue }
+                            Text { text: barWindow.dateStr; Layout.alignment: Qt.AlignLeft; font.family: "JetBrains Mono"; font.pixelSize: barWindow.s(11); font.weight: Font.Bold; color: mocha.subtext0 }
                         }
 
-                        // Weatherbox
                         RowLayout {
                             spacing: barWindow.s(8)
                             Text { 
@@ -1122,7 +1088,6 @@ Variants {
                     }
                 }
 
-                // ---------------- RIGHT CONTENT ----------------
                 Row {
                     id: rightContent
                     anchors.right: parent.right
@@ -1144,13 +1109,6 @@ Variants {
 
                     Behavior on opacity { NumberAnimation { duration: 600; easing.type: Easing.OutCubic } }
 
-                    Monitors.StatusMonitors { 
-                        barWindow: barWindow
-                        theme: mocha
-                        visible: rightContent.showLayout
-                    }
-
-                    // Dedicated System Tray Pill
                     Rectangle {
                         height: barWindow.barHeight
                         radius: barWindow.s(14)
@@ -1245,8 +1203,12 @@ Variants {
                             }
                         }
                     }
+  Monitors.StatusMonitors { 
+                        barWindow: barWindow
+                        theme: mocha
+                        visible: rightContent.showLayout
+                    }
 
-                    // System Elements Pill
                     Rectangle {
                         height: barWindow.barHeight
                         radius: barWindow.s(14)
@@ -1255,9 +1217,7 @@ Variants {
                         color: Qt.rgba(mocha.base.r, mocha.base.g, mocha.base.b, 0.75)
                         clip: true
                         
-                        property real targetWidth: sysLayout.width + barWindow.s(20)
-                        width: targetWidth
-                        Behavior on width { NumberAnimation { duration: 500; easing.type: Easing.OutQuint } }
+                        width: sysLayout.implicitWidth + barWindow.s(20)
 
                         Row {
                             id: sysLayout
@@ -1266,14 +1226,13 @@ Variants {
 
                             property int pillHeight: barWindow.s(34)
 
-                            // KB
                             Rectangle {
                                 property bool isHovered: kbMouse.containsMouse
                                 color: isHovered ? Qt.rgba(mocha.surface1.r, mocha.surface1.g, mocha.surface1.b, 0.6) : Qt.rgba(mocha.surface0.r, mocha.surface0.g, mocha.surface0.b, 0.4)
                                 radius: barWindow.s(10); height: sysLayout.pillHeight;
                                 clip: true
                                 
-                                property real targetWidth: kbLayoutRow.width + barWindow.s(24)
+                                property real targetWidth: kbLayoutRow.implicitWidth + barWindow.s(24)
                                 width: targetWidth
                                 Behavior on width { NumberAnimation { duration: 500; easing.type: Easing.OutQuint } }
                                 
@@ -1288,14 +1247,17 @@ Variants {
                                 Behavior on opacity { NumberAnimation { duration: 400; easing.type: Easing.OutCubic } }
 
                                 Row { 
-                                    id: kbLayoutRow; anchors.centerIn: parent; spacing: barWindow.s(8)
+                                    id: kbLayoutRow
+                                    anchors.verticalCenter: parent.verticalCenter
+                                    anchors.left: parent.left
+                                    anchors.leftMargin: barWindow.s(12)
+                                    spacing: barWindow.s(8)
                                     Text { anchors.verticalCenter: parent.verticalCenter; text: "󰌌"; font.family: "Iosevka Nerd Font"; font.pixelSize: barWindow.s(16); color: parent.parent.isHovered ? mocha.text : mocha.overlay2 }
                                     Text { anchors.verticalCenter: parent.verticalCenter; text: barWindow.kbLayout; font.family: "JetBrains Mono"; font.pixelSize: barWindow.s(13); font.weight: Font.Black; color: mocha.text }
                                 }
                                 MouseArea { id: kbMouse; anchors.fill: parent; hoverEnabled: true; onClicked: Quickshell.execDetached(["hyprctl", "switchxkblayout", "main", "next"]) }
                             }
 
-                            // WiFi / Ethernet (Desktop Mode)
                             Rectangle {
                                 id: wifiPill
                                 property bool isHovered: wifiMouse.containsMouse
@@ -1315,7 +1277,7 @@ Variants {
                                     }
                                 }
 
-                                property real targetWidth: wifiLayoutRow.width + barWindow.s(24)
+                                property real targetWidth: wifiLayoutRow.implicitWidth + barWindow.s(24)
                                 width: targetWidth
                                 Behavior on width { NumberAnimation { duration: 500; easing.type: Easing.OutQuint } }
                                 
@@ -1330,7 +1292,11 @@ Variants {
                                 Behavior on opacity { NumberAnimation { duration: 400; easing.type: Easing.OutCubic } }
 
                                 Row { 
-                                    id: wifiLayoutRow; anchors.centerIn: parent; spacing: barWindow.s(8)
+                                    id: wifiLayoutRow
+                                    anchors.verticalCenter: parent.verticalCenter
+                                    anchors.left: parent.left
+                                    anchors.leftMargin: barWindow.s(12)
+                                    spacing: barWindow.s(8)
                                     Text { 
                                         anchors.verticalCenter: parent.verticalCenter; 
                                         text: barWindow.showEthernet ? "󰈀" : barWindow.wifiIcon;
@@ -1350,7 +1316,6 @@ Variants {
                                 MouseArea { id: wifiMouse; hoverEnabled: true; anchors.fill: parent; onClicked: Quickshell.execDetached(["bash", "-c", "~/.config/hypr/scripts/qs_manager.sh toggle network wifi"]) }
                             }
 
-                            // Bluetooth
                             Rectangle {
                                 id: btPill
                                 property bool isHovered: btMouse.containsMouse
@@ -1370,7 +1335,7 @@ Variants {
                                     }
                                 }
 
-                                property real targetWidth: barWindow.isDesktop ? 0 : btLayoutRow.width + barWindow.s(24)
+                                property real targetWidth: barWindow.isDesktop ? 0 : btLayoutRow.implicitWidth + barWindow.s(24)
                                 width: targetWidth
                                 visible: targetWidth > 0
                                 Behavior on width { NumberAnimation { duration: 500; easing.type: Easing.OutQuint } }
@@ -1386,7 +1351,11 @@ Variants {
                                 Behavior on opacity { NumberAnimation { duration: 400; easing.type: Easing.OutCubic } }
 
                                 Row { 
-                                    id: btLayoutRow; anchors.centerIn: parent; spacing: barWindow.s(8)
+                                    id: btLayoutRow
+                                    anchors.verticalCenter: parent.verticalCenter
+                                    anchors.left: parent.left
+                                    anchors.leftMargin: barWindow.s(12)
+                                    spacing: barWindow.s(8)
                                     Text { anchors.verticalCenter: parent.verticalCenter; text: barWindow.btIcon; font.family: "Iosevka Nerd Font"; font.pixelSize: barWindow.s(16); color: barWindow.isBtOn ? mocha.base : mocha.subtext0 }
                                     Text { 
                                         id: btText
@@ -1401,7 +1370,6 @@ Variants {
                                 MouseArea { id: btMouse; hoverEnabled: true; anchors.fill: parent; onClicked: Quickshell.execDetached(["bash", "-c", "~/.config/hypr/scripts/qs_manager.sh toggle network bt"]) }
                             }
 
-                            // Volume
                             Rectangle {
                                 property bool isHovered: volMouse.containsMouse
                                 color: isHovered ? Qt.rgba(mocha.surface1.r, mocha.surface1.g, mocha.surface1.b, 0.6) : Qt.rgba(mocha.surface0.r, mocha.surface0.g, mocha.surface0.b, 0.4)
@@ -1420,7 +1388,7 @@ Variants {
                                     }
                                 }
                                 
-                                property real targetWidth: volLayoutRow.width + barWindow.s(24)
+                                property real targetWidth: volLayoutRow.implicitWidth + barWindow.s(24)
                                 width: targetWidth
                                 Behavior on width { NumberAnimation { duration: 500; easing.type: Easing.OutQuint } }
                                 
@@ -1435,7 +1403,11 @@ Variants {
                                 Behavior on opacity { NumberAnimation { duration: 400; easing.type: Easing.OutCubic } }
 
                                 Row { 
-                                    id: volLayoutRow; anchors.centerIn: parent; spacing: barWindow.s(8)
+                                    id: volLayoutRow
+                                    anchors.verticalCenter: parent.verticalCenter
+                                    anchors.left: parent.left
+                                    anchors.leftMargin: barWindow.s(12)
+                                    spacing: barWindow.s(8)
                                     Text { 
                                         anchors.verticalCenter: parent.verticalCenter
                                         text: barWindow.volIcon; font.family: "Iosevka Nerd Font"; font.pixelSize: barWindow.s(16); 
@@ -1451,7 +1423,6 @@ Variants {
                                 MouseArea { id: volMouse; hoverEnabled: true; anchors.fill: parent; onClicked: Quickshell.execDetached(["bash", "-c", "~/.config/hypr/scripts/qs_manager.sh toggle volume"]) }
                             }
 
-                            // Battery (or Power button for Desktop)
                             Rectangle {
                                 property bool isHovered: batMouse.containsMouse
                                 color: isHovered ? Qt.rgba(mocha.surface1.r, mocha.surface1.g, mocha.surface1.b, 0.6) : Qt.rgba(mocha.surface0.r, mocha.surface0.g, mocha.surface0.b, 0.4); 
@@ -1470,7 +1441,7 @@ Variants {
                                     }
                                 }
                                 
-                                property real targetWidth: barWindow.isDesktop ? barWindow.s(34) : batLayoutRow.width + barWindow.s(24)
+                                property real targetWidth: barWindow.isDesktop ? barWindow.s(34) : batLayoutRow.implicitWidth + barWindow.s(24)
                                 width: targetWidth
                                 Behavior on width { NumberAnimation { duration: 500; easing.type: Easing.OutQuint } }
                                 
@@ -1485,7 +1456,11 @@ Variants {
                                 Behavior on opacity { NumberAnimation { duration: 400; easing.type: Easing.OutCubic } }
 
                                 Row { 
-                                    id: batLayoutRow; anchors.centerIn: parent; spacing: barWindow.s(8)
+                                    id: batLayoutRow
+                                    anchors.verticalCenter: parent.verticalCenter
+                                    anchors.left: parent.left
+                                    anchors.leftMargin: barWindow.s(12)
+                                    spacing: barWindow.s(8)
                                     Text { 
                                         anchors.verticalCenter: parent.verticalCenter
                                         text: barWindow.isDesktop ? "" : barWindow.batIcon; 
@@ -1506,7 +1481,6 @@ Variants {
                         }
                     }
                     
-                    // --- Screen Recording Indicator & Stop Button ---
                     Rectangle {
                         id: recButton
                         property bool isHovered: recMouse.containsMouse
