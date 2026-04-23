@@ -3,7 +3,7 @@
 # ==============================================================================
 # Script Versioning & Initialization
 # ==============================================================================
-DOTS_VERSION="1.6.1"
+DOTS_VERSION="1.6.3"
 VERSION_FILE="$HOME/.local/state/imperative-dots-version"
 
 # ==============================================================================
@@ -1950,6 +1950,9 @@ KB_OPTIONS="$KB_OPTIONS"
 WALLPAPER_DIR="$WALLPAPER_DIR"
 TELEMETRY_ID="$TELEMETRY_ID"
 EOF
+
+rm -f ~/.cache/qs_update_pending 
+
 printf "  -> Configuration and version state saved %-7s ${C_GREEN}[ OK ]${RESET}\n" ""
 
 # ==============================================================================

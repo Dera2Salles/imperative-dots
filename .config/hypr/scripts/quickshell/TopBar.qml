@@ -743,7 +743,7 @@ Variants {
                                 onClicked: {
                                     barWindow.updateAvailable = false;
                                     barWindow.forceUpdateShow = false;
-                                    Quickshell.execDetached(["bash", "-c", "rm -f ~/.cache/qs_update_pending && ~/.config/hypr/scripts/qs_manager.sh toggle updater"]);
+                                    Quickshell.execDetached(["bash", "-c", "~/.config/hypr/scripts/qs_manager.sh toggle updater"]);
                                 }
                             }
                         }
