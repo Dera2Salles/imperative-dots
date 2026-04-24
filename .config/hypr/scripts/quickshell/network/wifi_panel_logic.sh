@@ -1,9 +1,15 @@
 #!/usr/bin/env bash
 
+# Zero-latency hardware presence check via sysfs (Instant, no nmcli hang)
+if ! ls -1d /sys/class/net/*/wireless &>/dev/null; then
+    echo '{ "present": false, "power": "off", "connected": null, "networks": [] }'
+    exit 0
+fi
+
 POWER=$(LC_ALL=C nmcli radio wifi)
 
 if [[ "$POWER" == "disabled" ]]; then
-    echo '{ "power": "off", "connected": null, "networks": [] }'
+    echo '{ "present": true, "power": "off", "connected": null, "networks": [] }'
     exit 0
 fi
 
@@ -79,4 +85,4 @@ else
 fi
 
 # Final JSON output
-echo "{\"power\":\"on\",\"connected\":$CONNECTED_JSON,\"networks\":$NETWORKS_JSON}"
+echo "{\"present\":true,\"power\":\"on\",\"connected\":$CONNECTED_JSON,\"networks\":$NETWORKS_JSON}"

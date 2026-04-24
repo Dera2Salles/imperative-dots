@@ -66,7 +66,6 @@ Variants {
             property bool showHelpIcon: true
             property bool isRecording: false
             
-            // Update Variables
             property bool updateAvailable: false
             property bool forceUpdateShow: false
             property bool isUpdateVisible: updateAvailable || forceUpdateShow
@@ -76,7 +75,6 @@ Variants {
             property string activeWidget: "" 
             property bool isSettingsOpen: activeWidget === "settings"
 
-            // Master transition property to decouple position from layout changes
             property real settingsSlideProgress: isSettingsOpen ? 1.0 : 0.0
             Behavior on settingsSlideProgress { 
                 enabled: barWindow.startupCascadeFinished
@@ -263,7 +261,7 @@ Variants {
             property bool isMediaActive: barWindow.musicData.status !== "Stopped" && barWindow.musicData.title !== ""
             property bool isWifiOn: barWindow.wifiStatus.toLowerCase() === "enabled" || barWindow.wifiStatus.toLowerCase() === "on"
             property bool isBtOn: barWindow.btStatus.toLowerCase() === "enabled" || barWindow.btStatus.toLowerCase() === "on"
-            property bool showEthernet: barWindow.isDesktop && !barWindow.isWifiOn
+            property bool showEthernet: barWindow.ethStatus === "Connected" || (barWindow.isDesktop && !barWindow.isWifiOn)
             
             property bool isSoundActive: !barWindow.isMuted && parseInt(barWindow.volPercent) > 0
             property int batCap: parseInt(barWindow.batPercent) || 0
@@ -583,12 +581,10 @@ Variants {
                         onTriggered: leftContent.showLayout = true
                     }
 
-                    // Directly tracks the inner layout width (No Behavior means it updates instantly in perfect sync)
                     width: leftLayout.width + barWindow.s(16)
 
                     Row {
                         id: leftLayout
-                        // Anchor to left so icons don't shift right when update button appears
                         anchors.verticalCenter: parent.verticalCenter
                         anchors.left: parent.left
                         anchors.leftMargin: barWindow.s(8)
@@ -690,13 +686,12 @@ Variants {
                             
                             visible: width > 0 || opacity > 0
                             opacity: barWindow.isUpdateVisible ? 1.0 : 0.0
-                            clip: false // Allows the subtle glow to overflow if needed
+                            clip: false 
                             
                             Behavior on width { NumberAnimation { duration: 400; easing.type: Easing.OutQuint } }
                             Behavior on opacity { NumberAnimation { duration: 300 } }
                             Behavior on color { ColorAnimation { duration: 200 } }
                             
-                            // Subtle clean pulse glow
                             Rectangle {
                                 anchors.centerIn: parent
                                 width: parent.width
@@ -758,13 +753,11 @@ Variants {
                     y: (parent.height - barWindow.barHeight) / 2
                     clip: true
                     
-                    // Directly bounds to implicit width for perfect sync (No Behavior on width needed)
                     width: workspacesModel.count > 0 ? wsLayout.implicitWidth + barWindow.s(20) : 0
                     
                     property real defaultX: leftContent.x + leftContent.width + barWindow.s(4)
                     property real settingsX: mediaBox.settingsX - width - (width > 0 ? barWindow.s(4) : 0)
                                         
-                    // Decoupled X calculation eliminates trailing lag
                     x: defaultX + (settingsX - defaultX) * barWindow.settingsSlideProgress
 
                     property bool limitActive: barWindow.isSettingsOpen && barWindow.isMediaActive
@@ -892,14 +885,12 @@ Variants {
                     height: barWindow.barHeight
                     clip: true 
                     
-                    // Directly animate width
                     width: barWindow.isMediaActive ? innerMediaLayout.implicitWidth + barWindow.s(24) : 0
                     Behavior on width { NumberAnimation { duration: 400; easing.type: Easing.OutQuint } }
 
                     property real defaultX: workspacesBox.defaultX + workspacesBox.width + (workspacesBox.width > 0 ? barWindow.s(4) : 0)
                     property real settingsX: centerBox.settingsX - width - (width > 0 ? barWindow.s(4) : 0)
 
-                    // Decoupled X calculation
                     x: defaultX + (settingsX - defaultX) * barWindow.settingsSlideProgress
 
                     visible: width > 0 || opacity > 0
@@ -1046,7 +1037,6 @@ Variants {
                     property real settingsX: barWindow.width - rightContent.width - width - barWindow.s(4)
                     property real defaultX: Math.max(minCenterDefaultX, pureCenter)
                     
-                    // Decoupled X calculation
                     x: defaultX + (settingsX - defaultX) * barWindow.settingsSlideProgress
                     
                     property bool showLayout: false
@@ -1494,63 +1484,6 @@ Variants {
                             }
                         }
                     }
-                    
-                    Rectangle {
-                        id: recButton
-                        property bool isHovered: recMouse.containsMouse
-                        
-                        color: isHovered ? Qt.rgba(mocha.surface1.r, mocha.surface1.g, mocha.surface1.b, 0.95) : Qt.rgba(mocha.base.r, mocha.base.g, mocha.base.b, 0.75)
-                        radius: barWindow.s(14)
-                        border.width: 1
-                        border.color: Qt.rgba(mocha.text.r, mocha.text.g, mocha.text.b, isHovered ? 0.15 : 0.05)
-
-                        property real targetWidth: barWindow.isRecording ? barWindow.barHeight : 0
-                        width: targetWidth
-                        height: barWindow.barHeight 
-
-                        visible: targetWidth > 0 || opacity > 0
-                        opacity: barWindow.isRecording ? 1.0 : 0.0
-                        clip: true
-
-                        Behavior on width { NumberAnimation { duration: 400; easing.type: Easing.OutQuint } }
-                        Behavior on opacity { NumberAnimation { duration: 300 } }
-                        
-                        scale: isHovered ? 1.05 : 1.0
-                        Behavior on scale { NumberAnimation { duration: 250; easing.type: Easing.OutExpo } }
-                        Behavior on color { ColorAnimation { duration: 200 } }
-
-                        Text {
-                            id: recIcon
-                            anchors.centerIn: parent
-                            text: "" 
-                            font.family: "Iosevka Nerd Font"
-                            font.pixelSize: barWindow.s(20)
-                            color: mocha.red
-                            
-                            SequentialAnimation on opacity {
-                                running: barWindow.isRecording && !recButton.isHovered
-                                loops: Animation.Infinite
-                                NumberAnimation { to: 0.3; duration: 600; easing.type: Easing.InOutSine }
-                                NumberAnimation { to: 1.0; duration: 600; easing.type: Easing.InOutSine }
-                            }
-                            SequentialAnimation on scale {
-                                running: barWindow.isRecording && !recButton.isHovered
-                                loops: Animation.Infinite
-                                NumberAnimation { to: 1.15; duration: 600; easing.type: Easing.InOutSine }
-                                NumberAnimation { to: 1.0; duration: 600; easing.type: Easing.InOutSine }
-                            }
-                        }
-                        
-                        MouseArea {
-                            id: recMouse
-                            anchors.fill: parent
-                            hoverEnabled: true
-                            onClicked: {
-                                barWindow.isRecording = false; 
-                                Quickshell.execDetached(["bash", "-c", "~/.config/hypr/scripts/screenshot.sh"]); 
-                            }
-                        }
-                    }                   
                 }
             }
         }
