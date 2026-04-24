@@ -3,7 +3,7 @@
 # ==============================================================================
 # Script Versioning & Initialization
 # ==============================================================================
-DOTS_VERSION="1.6.4"
+DOTS_VERSION="1.6.5"
 VERSION_FILE="$HOME/.local/state/imperative-dots-version"
 
 # ==============================================================================
@@ -1616,22 +1616,6 @@ else
     # Always overwrite with the Alt widget from the repo to prevent partial update conflicts
     if [ -f "$REPO_BAT_DIR/BatteryPopupAlt.qml" ]; then
         cp -f "$REPO_BAT_DIR/BatteryPopupAlt.qml" "$QS_BAT_DIR/BatteryPopup.qml" 2>/dev/null || true
-    fi
-fi
-
-# -> Desktop/Ethernet Network Adaptability <-
-QS_NET_DIR="$TARGET_CONFIG_DIR/hypr/scripts/quickshell/network"
-REPO_NET_DIR="$REPO_DIR/.config/hypr/scripts/quickshell/network"
-echo -e "  -> Checking for Wi-Fi interface..."
-if ls /sys/class/net/w* 1> /dev/null 2>&1 || iw dev 2>/dev/null | grep -q Interface; then
-    echo -e "  -> ${C_GREEN}Wi-Fi module detected.${RESET} Keeping standard Network widget."
-    if [ -f "$REPO_NET_DIR/NetworkPopup.qml" ]; then
-        cp -f "$REPO_NET_DIR/NetworkPopup.qml" "$QS_NET_DIR/NetworkPopup.qml" 2>/dev/null || true
-    fi
-else
-    echo -e "  -> ${C_YELLOW}No Wi-Fi module detected (Desktop/Ethernet).${RESET} Swapping to Alternate Network widget."
-    if [ -f "$REPO_NET_DIR/NetworkPopupAlt.qml" ]; then
-        cp -f "$REPO_NET_DIR/NetworkPopupAlt.qml" "$QS_NET_DIR/NetworkPopup.qml" 2>/dev/null || true
     fi
 fi
 
